@@ -13,7 +13,7 @@ Plan: https://claude.ai/code/artifact/73c6ab82-21f3-44be-939b-45d31d64e8b5
 |---|---|
 | `supabase/migrations/` | Postgres schema: products, listings, media, posts, jobs, profiles, allowed_emails, row-level security |
 | `seed/` | `apply_migrations.py` (runs the schema) and `seed_tracker.py` (one-time import of the Product Tracker) |
-| `web/` | React + Vite + TypeScript PWA talking straight to Supabase |
+| `web/` | React + Vite + TypeScript PWA talking straight to Supabase (`scripts/import-deals.ts` reuses the app's import code) |
 | `.github/workflows/deploy.yml` | Builds and publishes `web/` to GitHub Pages on every push to `main` |
 
 ## One-time setup
@@ -91,6 +91,24 @@ SUPABASE_URL=https://<ref>.supabase.co SUPABASE_SECRET_KEY='sb_secret_...' pytho
 Reads each product folder's Drive ID from the Google Drive for desktop mount
 (extended attribute `com.google.drivefs.item-id#S`) so the Product screen can
 open the folder in Drive. Done on 18 Oct 2026 for all 259 folders.
+
+### 6. Brand deals (ViralVue export)
+
+Migration `supabase/migrations/0002_deals.sql` adds a `deals` table. Import a
+ViralVue "Amazon brand deals" CSV either from the app (Settings → Import
+ViralVue export) or from the Mac with the same code:
+
+```bash
+cd web && SUPABASE_URL=https://<ref>.supabase.co SUPABASE_SECRET_KEY='sb_secret_...' npx tsx scripts/import-deals.ts ~/Downloads/amazon-brand-deals.csv
+```
+
+Rules (`web/src/lib/deals.ts`): deals are upserted by Deal ID, never duplicated;
+a deal whose ASIN matches a product's Amazon listing is linked and fills only the
+product's empty fields (source, brand, received date, image) and records the
+Amazon post if ViralVue says it was published; a received deal with no match
+shows on Home under "Needs your answer"; a deal where nothing arrived stays a
+deal row only ("Waiting on brand", or "went quiet" after 30 days) and becomes a
+product only when you tap "It arrived".
 
 ## Run locally
 

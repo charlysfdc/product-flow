@@ -10,6 +10,7 @@ import {
 } from '../lib/types'
 import { deadlineText } from '../components/ProductRow'
 import { Options, Sheet } from '../components/Sheet'
+import { DealCard } from '../components/DealCard'
 
 function fmtDate(d: string | null) {
   if (!d) return null
@@ -62,7 +63,7 @@ export function ProductPage() {
   if (error) return <main><Link to="/" className="back">‹ Home</Link><p className="error">{error}</p></main>
   if (!detail) return <main><Link to="/" className="back">‹ Home</Link><p className="muted">Loading…</p></main>
 
-  const { product: p, listings, posts, jobs } = detail
+  const { product: p, listings, posts, jobs, deals } = detail
   const due = deadlineText(p.deadline)
   const totalViews = posts.reduce((n, po) => n + (po.views ?? 0), 0)
   const folderUrl = driveFolderUrl(p)
@@ -182,6 +183,13 @@ export function ProductPage() {
         </div>
         {totalViews > 0 && <p className="muted small">{totalViews.toLocaleString()} Amazon views in total</p>}
       </section>
+
+      {deals.length > 0 && (
+        <section>
+          <h2>Brand deal{deals.length > 1 ? 's' : ''}</h2>
+          <ul className="cards">{deals.map((d) => <li key={d.id}><DealCard deal={d} /></li>)}</ul>
+        </section>
+      )}
 
       <section>
         <h2>Listings <span className="count">{listings.length}</span></h2>

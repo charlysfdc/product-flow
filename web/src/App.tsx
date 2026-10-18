@@ -3,6 +3,9 @@ import { AuthProvider, useAuth } from './lib/auth'
 import { Home } from './pages/Home'
 import { ProductPage } from './pages/ProductPage'
 import { SignIn } from './pages/SignIn'
+import { DealPage } from './pages/DealPage'
+import { Settings } from './pages/Settings'
+import { WaitingDeals } from './pages/WaitingDeals'
 
 function Gate() {
   const { session, loading } = useAuth()
@@ -12,6 +15,9 @@ function Gate() {
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/product/:id" element={<ProductPage />} />
+      <Route path="/deal/:id" element={<DealPage />} />
+      <Route path="/deals/waiting" element={<WaitingDeals />} />
+      <Route path="/settings" element={<Settings />} />
       <Route path="*" element={<Home />} />
     </Routes>
   )

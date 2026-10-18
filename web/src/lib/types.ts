@@ -55,6 +55,54 @@ export interface Job {
   created_at: string
 }
 
+export type DealMatchStatus = 'waiting' | 'needs_review' | 'matched' | 'ignored'
+export type DealState = 'waiting' | 'went_quiet' | 'received' | 'filmed' | 'published' | 'closed'
+
+export interface Deal {
+  id: string
+  platform: Platform
+  external_id: string
+  product_id: string | null
+  brand: string | null
+  asin: string | null
+  title: string | null
+  price: number | null
+  fee: number | null
+  image_url: string | null
+  message_sent_at: string | null
+  received_at: string | null
+  video_created_at: string | null
+  published_at: string | null
+  deal_created_at: string | null
+  deal_updated_at: string | null
+  status_raw: string | null
+  match_status: DealMatchStatus
+  imported_at: string
+}
+
+export const DEAL_STATE_LABEL: Record<DealState, string> = {
+  waiting: 'Waiting on brand',
+  went_quiet: 'Went quiet',
+  received: 'Received',
+  filmed: 'Filmed',
+  published: 'Published',
+  closed: 'Closed',
+}
+
+const QUIET_AFTER_DAYS = 30
+
+/** Where a deal stands, from ViralVue's dates and status. */
+export function dealState(d: Pick<Deal, 'message_sent_at' | 'received_at' | 'video_created_at' | 'published_at' | 'deal_created_at' | 'status_raw'>, now = Date.now()): DealState {
+  const raw = (d.status_raw ?? '').toLowerCase()
+  if (/cancel|declin|reject|expire|closed/.test(raw)) return 'closed'
+  if (d.published_at) return 'published'
+  if (d.video_created_at) return 'filmed'
+  if (d.received_at) return 'received'
+  const since = d.message_sent_at ?? d.deal_created_at
+  if (since && now - new Date(since).getTime() > QUIET_AFTER_DAYS * 86400000) return 'went_quiet'
+  return 'waiting'
+}
+
 export function driveFolderUrl(p: Pick<Product, 'drive_folder_id' | 'drive_folder_name'>): string | null {
   if (p.drive_folder_id) return `https://drive.google.com/drive/folders/${p.drive_folder_id}`
   if (p.drive_folder_name) return `https://drive.google.com/drive/search?q=${encodeURIComponent(p.drive_folder_name)}`

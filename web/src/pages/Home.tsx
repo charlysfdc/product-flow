@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { useSnapshot } from '../lib/data'
-import type { Job, Platform, Product } from '../lib/types'
+import { dealState, type Deal, type Job, type Platform, type Product } from '../lib/types'
 import { PLATFORM_LABEL, PLATFORM_ORDER } from '../lib/types'
 import { ProductRow, daysUntil } from '../components/ProductRow'
 
@@ -12,6 +13,9 @@ type View =
       dueSoon: Product[]
       received: Product[]
       needsAnswer: { job: Job; product: Product }[]
+      dealsToAnswer: Deal[]
+      waiting: number
+      quiet: number
       filmed: Product[]
       ready: { key: string; label: string; items: Product[] }[]
       counts: { total: number; done: number }
@@ -23,13 +27,13 @@ function byDeadlineThenName(a: Product, b: Product) {
 }
 
 export function Home() {
-  const { session, signOut } = useAuth()
+  const { session } = useAuth()
   const { data, error } = useSnapshot()
   const [query, setQuery] = useState('')
 
   const view = useMemo((): View | null => {
     if (!data) return null
-    const { products, listings, posts, jobs } = data
+    const { products, listings, posts, jobs, deals } = data
     const byId = new Map(products.map((p) => [p.id, p]))
 
     const q = query.trim().toLowerCase()
@@ -56,6 +60,10 @@ export function Home() {
       .map((j) => ({ job: j, product: j.product_id ? byId.get(j.product_id) : undefined }))
       .filter((x): x is { job: Job; product: Product } => Boolean(x.product))
 
+    const dealsToAnswer = deals.filter((d) => d.match_status === 'needs_review')
+    const waitingDeals = deals.filter((d) => d.match_status === 'waiting')
+    const waiting = waitingDeals.filter((d) => dealState(d) === 'waiting').length
+    const quiet = waitingDeals.length - waiting
     const filmed = products.filter((p) => p.status === 'filmed' && !dueIds.has(p.id)).sort(byDeadlineThenName)
 
     // Ready to post: one entry per platform the product is listed on and not yet posted to.
@@ -78,7 +86,7 @@ export function Home() {
       total: products.length,
       done: products.filter((p) => p.status === 'done').length,
     }
-    return { kind: 'lists', dueSoon, received, needsAnswer, filmed, ready, counts }
+    return { kind: 'lists', dueSoon, received, needsAnswer, dealsToAnswer, waiting, quiet, filmed, ready, counts }
   }, [data, query])
 
   const name = session?.user.user_metadata?.full_name?.split(' ')[0] ?? session?.user.email ?? ''
@@ -90,7 +98,7 @@ export function Home() {
           <h1>Product Flow</h1>
           <div className="muted small">{name}</div>
         </div>
-        <button className="link" onClick={signOut}>Sign out</button>
+        <Link to="/settings" className="link-btn">Settings</Link>
       </header>
 
       <input
@@ -134,11 +142,23 @@ export function Home() {
           </section>
 
           <section>
-            <h2>Needs your answer <span className="count">{view.needsAnswer.length}</span></h2>
-            {view.needsAnswer.length === 0 ? (
-              <p className="empty">No jobs are waiting on you.</p>
+            <h2>Needs your answer <span className="count">{view.needsAnswer.length + view.dealsToAnswer.length}</span></h2>
+            {view.needsAnswer.length + view.dealsToAnswer.length === 0 ? (
+              <p className="empty">Nothing is waiting on you.</p>
             ) : (
               <ul className="list">
+                {view.dealsToAnswer.map((d) => (
+                  <li key={d.id}>
+                    <Link to={`/deal/${d.id}`} className="row">
+                      {d.image_url && <img src={d.image_url} alt="" className="thumb" />}
+                      <div className="row-main">
+                        <div className="row-title">{d.title ?? d.asin}</div>
+                        <div className="row-sub"><span>Brand deal{d.brand ? ` · ${d.brand}` : ''}</span><span>Which product is this?</span></div>
+                      </div>
+                      <span className="chev" aria-hidden>›</span>
+                    </Link>
+                  </li>
+                ))}
                 {view.needsAnswer.map(({ job, product }) => (
                   <ProductRow key={job.id} product={product} detail={job.question ?? `${job.type} needs review`} />
                 ))}
@@ -168,6 +188,22 @@ export function Home() {
               <ul className="list">{view.filmed.map((p) => <ProductRow key={p.id} product={p} />)}</ul>
             )}
           </section>
+
+          {(view.waiting > 0 || view.quiet > 0) && (
+            <section>
+              <ul className="list">
+                <li>
+                  <Link to="/deals/waiting" className="row">
+                    <div className="row-main">
+                      <div className="row-title">Waiting on brand <span className="count">{view.waiting}</span></div>
+                      <div className="row-sub"><span>Deals you messaged, nothing arrived yet</span>{view.quiet > 0 && <span>{view.quiet} went quiet</span>}</div>
+                    </div>
+                    <span className="chev" aria-hidden>›</span>
+                  </Link>
+                </li>
+              </ul>
+            </section>
+          )}
 
           <p className="muted small footer">
             {view.counts.total} products, {view.counts.done} done. Search to find any of them.

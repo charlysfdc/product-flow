@@ -12,7 +12,7 @@ import { useSyncExternalStore } from 'react'
 import { callFunction } from './functions'
 
 const CHUNK = 8 * 1024 * 1024          // a multiple of 256 KiB, as Drive requires
-const MAX_TRIES = 12                   // per stretch without progress
+const MAX_TRIES = 40                   // tries in a row without progress, counted only while the app is open (~18 min)
 const RESUME_KEY = 'pf.uploads'        // file → session URL, for picking the same file again
 const PHONE_KEY = 'pf.phone'
 
@@ -160,7 +160,11 @@ async function uploadOne(id: string) {
     forgetSession(it.file)
     patch(id, { state: 'done', note: null })
   } catch (e) {
-    patch(id, { state: 'failed', error: (e as Error).message, note: null })
+    const cur = get(id)
+    const error = isNetworkError(e)
+      ? `Stopped at ${fmtBytes(cur.sent)} of ${fmtBytes(cur.size)}: the connection kept dropping. Tap Try again to carry on from there.`
+      : (e as Error).message
+    patch(id, { state: 'failed', error, note: null })
   }
 }
 
@@ -170,14 +174,21 @@ async function withRetry<T>(id: string, fn: () => Promise<T>): Promise<T> {
     try {
       return await fn()
     } catch (e) {
-      if (tries >= MAX_TRIES || !isNetworkError(e)) throw e
+      if (!isNetworkError(e)) throw e
+      if (document.visibilityState === 'visible' && tries >= MAX_TRIES) throw e
+      if (document.visibilityState !== 'visible') tries--
       await backoff(id, tries)
     }
   }
 }
 
 async function backoff(id: string, tries: number) {
-  const ms = Math.min(30000, 1000 * 2 ** (tries - 1))
+  // The phone locked or the app went to the background: wait for it to come back, without counting a try.
+  while (document.visibilityState !== 'visible') {
+    patch(id, { state: 'retrying', note: 'Paused while the app is in the background. It carries on when you come back.' })
+    await sleep(60 * 60 * 1000)
+  }
+  const ms = Math.min(30000, 1000 * 2 ** (Math.min(tries, 6) - 1))
   const why = navigator.onLine === false ? 'No connection' : 'Connection dropped'
   patch(id, { state: 'retrying', note: `${why}, trying again in ${Math.round(ms / 1000)} s` })
   await sleep(ms)
@@ -230,7 +241,8 @@ async function sendFile(id: string): Promise<DriveFileResult> {
         forgetSession(it.file)
         return sendFile(id)
       }
-      if (!(e instanceof NetError) || ++tries >= MAX_TRIES) throw e
+      if (!(e instanceof NetError)) throw e
+      if (document.visibilityState === 'visible' && ++tries >= MAX_TRIES) throw e
       await backoff(id, tries)
       const st = await withRetry(id, () => status(url!, it.size))
       if (st.file) return st.file
@@ -251,7 +263,7 @@ function putChunk(url: string, file: File, start: number, end: number, total: nu
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('PUT', url)
-    xhr.timeout = 5 * 60 * 1000
+    xhr.timeout = 2 * 60 * 1000             // no answer for 2 minutes: treat as dropped and resume
     xhr.setRequestHeader('Content-Range', `bytes ${start}-${end - 1}/${total}`)
     xhr.upload.onprogress = (e) => onProgress(e.loaded)
     xhr.onload = () => {

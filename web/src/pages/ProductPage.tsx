@@ -189,7 +189,7 @@ export function ProductPage() {
   const folderLink = (label: string) => folderUrl
     ? <a className="pri" href={folderUrl} target="_blank" rel="noreferrer">{label} ↗</a>
     : <button className="pri" disabled={busy} onClick={makeFolder}>{busy ? 'Making the folder…' : 'Make the Drive folder'}</button>
-  const next: { eyebrow: string; title: string; body: string; main: React.ReactNode; subLabel?: string; sub?: React.ReactNode } = (() => {
+  const next: { eyebrow: string; title: string; body: string; main: React.ReactNode; subLabel?: string; sub?: React.ReactNode; moreLabel?: string; more?: React.ReactNode } = (() => {
     const deadline = due ? ` ${p.source === 'tiktok_sample' ? 'TikTok Shop deadline' : 'Deadline'}: ${due.toLowerCase()}.` : ''
     switch (p.status) {
       case 'expected':
@@ -202,7 +202,8 @@ export function ProductPage() {
       case 'filmed':
       case 'editing':
         return { eyebrow: p.status === 'editing' ? 'Being edited' : 'Next step', title: plannedAmazon ? 'Edit it and upload to Amazon' : 'Edit it',
-          body: `Raw clips are in Drive.${deadline}`, main: folderLink('Open raw clips'),
+          body: `${clips.length ? `${clips.length} raw clip${clips.length === 1 ? ' is' : 's are'}` : 'Raw clips are'} in Drive.${deadline}`, main: folderLink('Open raw clips'),
+          moreLabel: 'More to film?', more: <UploadButton product={p} label="Upload more clips ›" />,
           subLabel: 'Already edited?', sub: <button disabled={busy} onClick={() => setStatus('ready')}>Mark as edited ›</button> }
       case 'ready':
         return unposted.length
@@ -254,6 +255,7 @@ export function ProductPage() {
         <h2>{next.title}</h2>
         <p>{next.body}</p>
         {next.main}
+        {next.more && <div className="sub"><span>{next.moreLabel}</span>{next.more}</div>}
         {(next.subLabel || next.sub) && <div className="sub"><span>{next.subLabel}</span>{next.sub}</div>}
         {p.status === 'received' && syncNote && <p>{syncNote}</p>}
       </section>

@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { useSnapshot } from '../lib/data'
-import { dealState, type Deal, type Job, type Platform, type Product } from '../lib/types'
+import type { Deal, Job, Platform, Product } from '../lib/types'
+import { suggestProducts } from '../lib/deals'
 import { PLATFORM_LABEL, PLATFORM_ORDER } from '../lib/types'
 import { ProductRow, daysUntil } from '../components/ProductRow'
 
@@ -13,7 +14,7 @@ type View =
       dueSoon: Product[]
       received: Product[]
       needsAnswer: { job: Job; product: Product }[]
-      dealsToAnswer: Deal[]
+      dealsToAnswer: { deal: Deal; suggestion: string | null }[]
       waiting: number
       quiet: number
       filmed: Product[]
@@ -33,7 +34,7 @@ export function Home() {
 
   const view = useMemo((): View | null => {
     if (!data) return null
-    const { products, listings, posts, jobs, deals } = data
+    const { products, listings, posts, jobs, deals, waiting, quiet } = data
     const byId = new Map(products.map((p) => [p.id, p]))
 
     const q = query.trim().toLowerCase()
@@ -60,10 +61,8 @@ export function Home() {
       .map((j) => ({ job: j, product: j.product_id ? byId.get(j.product_id) : undefined }))
       .filter((x): x is { job: Job; product: Product } => Boolean(x.product))
 
-    const dealsToAnswer = deals.filter((d) => d.match_status === 'needs_review')
-    const waitingDeals = deals.filter((d) => d.match_status === 'waiting')
-    const waiting = waitingDeals.filter((d) => dealState(d) === 'waiting').length
-    const quiet = waitingDeals.length - waiting
+    const lite = products.map((p) => ({ id: p.id, name: p.name, brand: p.brand }))
+    const dealsToAnswer = deals.map((deal) => ({ deal, suggestion: suggestProducts(deal, lite, 1)[0]?.name ?? null }))
     const filmed = products.filter((p) => p.status === 'filmed' && !dueIds.has(p.id)).sort(byDeadlineThenName)
 
     // Ready to post: one entry per platform the product is listed on and not yet posted to.
@@ -147,13 +146,13 @@ export function Home() {
               <p className="empty">Nothing is waiting on you.</p>
             ) : (
               <ul className="list">
-                {view.dealsToAnswer.map((d) => (
+                {view.dealsToAnswer.map(({ deal: d, suggestion }) => (
                   <li key={d.id}>
                     <Link to={`/deal/${d.id}`} className="row">
                       {d.image_url && <img src={d.image_url} alt="" className="thumb" />}
                       <div className="row-main">
                         <div className="row-title">{d.title ?? d.asin}</div>
-                        <div className="row-sub"><span>Brand deal{d.brand ? ` · ${d.brand}` : ''}</span><span>Which product is this?</span></div>
+                        <div className="row-sub"><span>Brand deal{d.brand ? ` · ${d.brand}` : ''}</span><span>{suggestion ? `Same as ${suggestion}?` : 'Which product is this?'}</span></div>
                       </div>
                       <span className="chev" aria-hidden>›</span>
                     </Link>

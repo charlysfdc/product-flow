@@ -92,16 +92,26 @@ export const DEAL_STATE_LABEL: Record<DealState, string> = {
 const QUIET_AFTER_DAYS = 30
 
 /** Where a deal stands, from ViralVue's dates and status. */
+/** Statuses where the brand is actively talking: never "went quiet". */
+const ACTIVE_STATUSES = ['negotiating', 'in_progress', 'new']
+
 export function dealState(d: Pick<Deal, 'message_sent_at' | 'received_at' | 'video_created_at' | 'published_at' | 'deal_created_at' | 'status_raw'>, now = Date.now()): DealState {
   const raw = (d.status_raw ?? '').toLowerCase()
   if (/cancel|declin|reject|expire|closed/.test(raw)) return 'closed'
   if (d.published_at) return 'published'
   if (d.video_created_at) return 'filmed'
   if (d.received_at) return 'received'
+  if (ACTIVE_STATUSES.includes(raw)) return 'waiting'
   const since = d.message_sent_at ?? d.deal_created_at
   if (since && now - new Date(since).getTime() > QUIET_AFTER_DAYS * 86400000) return 'went_quiet'
   return 'waiting'
 }
+
+/** Cut-off for the server-side "still waiting" filter (same rule as dealState). */
+export function quietCutoffIso(now = Date.now()): string {
+  return new Date(now - QUIET_AFTER_DAYS * 86400000).toISOString()
+}
+export const ACTIVE_DEAL_STATUSES = ACTIVE_STATUSES
 
 export function driveFolderUrl(p: Pick<Product, 'drive_folder_id' | 'drive_folder_name'>): string | null {
   if (p.drive_folder_id) return `https://drive.google.com/drive/folders/${p.drive_folder_id}`

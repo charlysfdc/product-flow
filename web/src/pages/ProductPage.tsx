@@ -139,9 +139,8 @@ export function ProductPage() {
           {p.upc && <><dt>Barcode</dt><dd>{p.upc}</dd></>}
           {p.received_at && <><dt>Received</dt><dd>{fmtDate(p.received_at)}</dd></>}
           {p.deadline && <><dt>Deadline</dt><dd>{fmtDate(p.deadline)}</dd></>}
-          {folderUrl && (
-            <><dt>Drive folder</dt><dd><a href={folderUrl} target="_blank" rel="noreferrer">{p.drive_folder_name ?? 'Open in Drive'} ↗</a></dd></>
-          )}
+          <dt>Drive folder</dt>
+          <dd>{folderUrl ? <a href={folderUrl} target="_blank" rel="noreferrer">{p.drive_folder_name ?? 'Open in Drive'} ↗</a> : <span className="muted">No Drive folder yet</span>}</dd>
         </dl>
       </header>
 

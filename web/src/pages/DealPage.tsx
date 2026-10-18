@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { createProductFromDeal, ignoreDeal, linkDealToProduct, receiveDeal } from '../lib/deals'
+import { createProductFromDeal, ignoreDeal, linkDealToProduct, receiveDeal, selectAll, suggestProducts } from '../lib/deals'
 import { STATUS_LABEL, type Deal, type Product } from '../lib/types'
 import { DealCard } from '../components/DealCard'
 import { Sheet } from '../components/Sheet'
@@ -31,9 +31,11 @@ export function DealPage() {
   }, [id])
 
   useEffect(() => {
-    if (!picking || all) return
-    supabase.from('products').select('*').order('name').then(({ data }) => setAll((data ?? []) as Product[]))
-  }, [picking, all])
+    if (all || !deal || deal.product_id || deal.match_status === 'ignored') return
+    selectAll<Product>((a, b) => supabase.from('products').select('*').order('name').range(a, b)).then(setAll)
+  }, [all, deal])
+
+  const suggestions = useMemo(() => (all && deal ? suggestProducts(deal, all, 3).map((s) => all.find((p) => p.id === s.id)!) : []), [all, deal])
 
   const hits = useMemo(() => {
     if (!all) return []
@@ -91,6 +93,21 @@ export function DealPage() {
         <section>
           <h2>Which product is this?</h2>
           <p className="muted small">The ASIN did not match any product. Most often it is a colour or size of one you already have.</p>
+          {suggestions.length > 0 && (
+            <ul className="list">
+              {suggestions.map((p) => (
+                <li key={p.id}>
+                  <button className="row row-btn" disabled={busy} onClick={() => run('Link', async () => {
+                    await linkDealToProduct(supabase, deal, p)
+                    return `/product/${p.id}`
+                  })}>
+                    <span className="row-main"><span className="row-title">Same as {p.name}?</span><span className="row-sub">{STATUS_LABEL[p.status]}{p.brand ? ` · ${p.brand}` : ''}</span></span>
+                    <span className="chev" aria-hidden>›</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="actions">
             <button className="primary" onClick={() => setPicking(true)} disabled={busy}>Same as… (search products)</button>
             <button className="secondary" disabled={busy} onClick={() => run('Create product', async () => {

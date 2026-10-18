@@ -10,6 +10,7 @@ export function Settings() {
   const [busy, setBusy] = useState(false)
   const [summary, setSummary] = useState<ImportSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [progress, setProgress] = useState<string | null>(null)
 
   const onFile = async (file: File | undefined) => {
     if (!file) return
@@ -18,11 +19,12 @@ export function Settings() {
     setSummary(null)
     try {
       const text = await file.text()
-      setSummary(await importDeals(supabase, text))
+      setSummary(await importDeals(supabase, text, setProgress))
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setBusy(false)
+      setProgress(null)
       if (fileRef.current) fileRef.current.value = ''
     }
   }
@@ -52,14 +54,17 @@ export function Settings() {
           </p>
           <input ref={fileRef} type="file" accept=".csv,text/csv,text/plain" style={{ display: 'none' }} onChange={(e) => onFile(e.target.files?.[0])} />
           <button className="primary" disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? 'Importing…' : 'Choose CSV file'}</button>
+          {progress && <p className="muted small">{progress}</p>}
           {error && <p className="error">{error}</p>}
           {summary && (
             <div className="summary">
-              <p><b>{summary.total}</b> deals in the file: <b>{summary.created}</b> new, <b>{summary.updated}</b> updated, <b>{summary.needsReview}</b> need your answer.</p>
+              <p><b>{summary.total}</b> deals in the file: <b>{summary.created}</b> new, <b>{summary.updated}</b> updated, <b>{summary.needsReview.length}</b> need your answer.</p>
               <p className="muted small">
-                {summary.matched} linked to a product, {summary.waiting} still waiting on the brand, {summary.postsCreated} Amazon posts recorded.
+                {summary.matched} linked to a product ({summary.productsCreated.length} products created), {summary.waitingShown} waiting on the brand
+                {summary.waitingHidden > 0 ? ` (+${summary.waitingHidden} went quiet)` : ''}, {summary.closed} declined, {summary.postsCreated} Amazon posts recorded.
+                {summary.replyRate.messaged > 0 && ` Reply rate: ${summary.replyRate.received} of ${summary.replyRate.messaged} messaged brands sent a product.`}
               </p>
-              {summary.needsReview > 0 && <p><Link to="/">Answer them on Home</Link></p>}
+              {summary.needsReview.length > 0 && <p><Link to="/">Answer them on Home</Link></p>}
               {summary.errors.length > 0 && (
                 <details><summary className="error">{summary.errors.length} rows failed</summary><ul>{summary.errors.map((e, i) => <li key={i} className="small">{e}</li>)}</ul></details>
               )}

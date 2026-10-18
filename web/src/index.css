@@ -140,3 +140,4 @@ button.secondary:disabled, button.link:disabled { opacity: 0.5; }
 .deal-published { background: var(--accent); color: var(--accent-text); }
 .deal-closed { background: var(--chip); color: var(--muted); }
 .toggle { display: flex; gap: 8px; align-items: center; font-size: 15px; margin: 8px 0 12px; }
+.pager { display: flex; justify-content: space-between; align-items: center; margin: 12px 0; }

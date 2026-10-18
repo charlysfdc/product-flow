@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from './supabase'
-import type { Deal, Job, Listing, Post, Product } from './types'
+import { ACTIVE_DEAL_STATUSES, quietCutoffIso, type Deal, type Job, type Listing, type Post, type Product } from './types'
 
 export interface Snapshot {
   products: Product[]
   listings: Listing[]
   posts: Post[]
   jobs: Job[]
-  deals: Deal[]          // waiting on the brand, or waiting for an answer
+  deals: Deal[]          // received deals waiting for an answer
+  waiting: number        // deals still waiting on the brand (shown)
+  quiet: number          // waiting deals that went quiet (hidden)
+}
+
+/** PostgREST filter for "still waiting": brand is talking, or messaged within 30 days. */
+export function stillWaitingFilter(): string {
+  const cutoff = quietCutoffIso()
+  return `status_raw.in.(${ACTIVE_DEAL_STATUSES.join(',')}),message_sent_at.gt.${cutoff},and(message_sent_at.is.null,deal_created_at.gt.${cutoff})`
 }
 
 /** Loads everything Home needs (a few hundred small rows) and refreshes when rows change. */
@@ -16,12 +24,14 @@ export function useSnapshot() {
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const [p, l, po, j, d] = await Promise.all([
+    const [p, l, po, j, d, w, wAll] = await Promise.all([
       supabase.from('products').select('*').order('name'),
       supabase.from('listings').select('id,product_id,platform,external_id,url,commission,availability,availability_note,checked_at'),
       supabase.from('posts').select('id,product_id,platform,status,title,url,posted_at,views'),
       supabase.from('jobs').select('id,product_id,type,status,question,created_at').eq('status', 'needs_review'),
-      supabase.from('deals').select('*').in('match_status', ['waiting', 'needs_review']).order('deal_created_at', { ascending: false }),
+      supabase.from('deals').select('*').eq('match_status', 'needs_review').order('deal_created_at', { ascending: false }),
+      supabase.from('deals').select('id', { count: 'exact', head: true }).eq('match_status', 'waiting').or(stillWaitingFilter()),
+      supabase.from('deals').select('id', { count: 'exact', head: true }).eq('match_status', 'waiting'),
     ])
     // deals may not exist yet (migration 0002 pending): treat as empty
     const err = p.error ?? l.error ?? po.error ?? j.error
@@ -36,6 +46,8 @@ export function useSnapshot() {
       posts: (po.data ?? []) as Post[],
       jobs: (j.data ?? []) as Job[],
       deals: (d.error ? [] : (d.data ?? [])) as Deal[],
+      waiting: w.count ?? 0,
+      quiet: Math.max(0, (wAll.count ?? 0) - (w.count ?? 0)),
     })
   }, [])
 

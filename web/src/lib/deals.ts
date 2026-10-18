@@ -11,7 +11,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { parseCsv } from './csv'
-import { dealState, type Deal, type LinkAdded, type Product, type ProductStatus } from './types'
+import { dealState, type Deal, type LinkAdded, type Product, type ProductSource, type ProductStatus } from './types'
 
 export interface DealInput {
   platform: 'amazon_us'
@@ -135,13 +135,15 @@ export function suggestProducts(deal: Pick<Deal, 'brand' | 'title'>, products: P
 /**
  * Link a deal to a product: fill the product's empty fields, make sure the ASIN
  * listing and (if published) an Amazon post exist. The source is set only when
- * it is still unknown; a product marked Bought (or anything else) keeps it.
+ * it is still unknown, unless `source` is given: that is an explicit choice
+ * ("I bought it") and overrides, with the previous value kept for Unlink.
  */
-export async function linkDealToProduct(client: SupabaseClient, deal: Deal, product: Product, extra: LinkAdded = {}): Promise<{ postCreated: boolean }> {
+export async function linkDealToProduct(client: SupabaseClient, deal: Deal, product: Product, extra: LinkAdded = {}, source?: ProductSource): Promise<{ postCreated: boolean }> {
   const added: LinkAdded = { ...extra }
   const patch: Partial<Product> = {}
   const before: NonNullable<LinkAdded['product_before']> = {}
-  if (product.source === 'unknown') { patch.source = 'amazon_sample'; before.source = product.source }
+  if (source && source !== product.source) { patch.source = source; before.source = product.source }
+  else if (product.source === 'unknown') { patch.source = 'amazon_sample'; before.source = product.source }
   if (!product.brand && deal.brand) { patch.brand = deal.brand; before.brand = product.brand }
   if (!product.received_at && deal.received_at) { patch.received_at = day(deal.received_at); before.received_at = product.received_at }
   if (!product.product_image_url && deal.image_url) { patch.product_image_url = deal.image_url; before.product_image_url = product.product_image_url }

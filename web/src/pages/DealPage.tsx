@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { createProductFromDeal, ignoreDeal, linkDealToProduct, receiveDeal, selectAll, suggestProducts, unlinkDeal } from '../lib/deals'
-import { STATUS_LABEL, type Deal, type Product } from '../lib/types'
+import { SOURCE_HELP, SOURCE_LABEL, SOURCE_ORDER, STATUS_LABEL, type Deal, type Product, type ProductSource } from '../lib/types'
 import { DealCard } from '../components/DealCard'
 import { Options, Sheet } from '../components/Sheet'
 
@@ -17,7 +17,9 @@ export function DealPage() {
   const [picking, setPicking] = useState(false)
   const [arrived, setArrived] = useState(false)
   const [confirm, setConfirm] = useState<Product | null>(null)
+  const [confirmSource, setConfirmSource] = useState<'amazon_sample' | 'bought'>('amazon_sample')
   const [confirmUnlink, setConfirmUnlink] = useState(false)
+  const [sourceSheet, setSourceSheet] = useState(false)
   const [all, setAll] = useState<Product[] | null>(null)
   const [q, setQ] = useState('')
 
@@ -73,6 +75,9 @@ export function DealPage() {
         <section>
           <h2>Linked product</h2>
           <ul className="list"><li><Link to={`/product/${linked.id}`} className="row"><span className="row-main"><span className="row-title">{linked.name}</span><span className="row-sub">{STATUS_LABEL[linked.status]}</span></span><span className="chev">›</span></Link></li></ul>
+          <div className="chips">
+            <button className={'chip chip-btn' + (linked.source === 'unknown' ? ' chip-ask' : '')} onClick={() => setSourceSheet(true)}>{SOURCE_LABEL[linked.source]} ▾</button>
+          </div>
           <div className="actions"><button className="link" disabled={busy} onClick={() => setConfirmUnlink(true)}>Unlink (wrong product)</button></div>
         </section>
       ) : deal.match_status === 'ignored' ? (
@@ -128,13 +133,37 @@ export function DealPage() {
         <Sheet title="Link this deal?" onClose={() => setConfirm(null)}>
           <p>Link <b>{deal.brand ?? deal.title}</b> to <b>{confirm.name}</b>?</p>
           <p className="muted small">The product gets this deal's ASIN listing and, where empty, its brand, image and received date. You can unlink later.</p>
+          <Options
+            options={[
+              { value: 'amazon_sample' as const, label: 'Free sample', help: 'The brand sent it through the deal.' },
+              { value: 'bought' as const, label: 'I bought it', help: 'Paid for it yourself; the product is marked Bought.' },
+            ]}
+            value={confirmSource}
+            onPick={setConfirmSource}
+          />
           <div className="actions">
             <button className="primary" disabled={busy} onClick={() => run('Link', async () => {
-              await linkDealToProduct(supabase, deal, confirm)
+              await linkDealToProduct(supabase, deal, confirm, {}, confirmSource === 'bought' ? 'bought' : undefined)
               return `/product/${confirm.id}`
             })}>Yes, link</button>
             <button className="link" onClick={() => setConfirm(null)}>Cancel</button>
           </div>
+        </Sheet>
+      )}
+
+      {sourceSheet && linked && (
+        <Sheet title="Where did it come from?" onClose={() => setSourceSheet(false)}>
+          <p className="muted small">Changes the source on {linked.name}.</p>
+          <Options
+            options={SOURCE_ORDER.map((v) => ({ value: v, label: SOURCE_LABEL[v], help: SOURCE_HELP[v] }))}
+            value={linked.source === 'unknown' ? null : linked.source}
+            onPick={(source: ProductSource) => run('Changing source', async () => {
+              const { error } = await supabase.from('products').update({ source }).eq('id', linked.id)
+              if (error) throw error
+              setLinked({ ...linked, source })
+              setSourceSheet(false)
+            })}
+          />
         </Sheet>
       )}
 

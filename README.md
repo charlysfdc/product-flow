@@ -26,10 +26,13 @@ terminal or run `source ~/.zshrc`.
 
 Create a free project at https://supabase.com/dashboard and collect:
 
-- Project URL and anon (publishable) key → `web/.env.local` and the GitHub
-  repository variables `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`
-- Service-role (secret) key → only for `seed_tracker.py`, never in the app
-- Database connection string (Connect → Session pooler) → `apply_migrations.py`
+- Project URL and publishable key (`sb_publishable_...`) → `web/.env.local`
+  and `web/.env.production` (both public by design)
+- Secret key (`sb_secret_...`) → only for `seed_tracker.py`, never in the app
+- Database connection string (Connect → Session pooler) → `apply_migrations.py`,
+  or paste the migration into the dashboard's SQL editor instead
+
+Current project: `cjtiiufrtmwdqgikpcxi` (created 18 Oct 2026, East US).
 
 ### 2. Schema
 
@@ -64,7 +67,7 @@ deployed app URL and add these Redirect URLs:
 ### 4. Seed from the tracker (once)
 
 ```bash
-SUPABASE_URL=https://<ref>.supabase.co SUPABASE_SERVICE_ROLE_KEY='...' python3 seed/seed_tracker.py
+SUPABASE_URL=https://<ref>.supabase.co SUPABASE_SECRET_KEY='sb_secret_...' python3 seed/seed_tracker.py
 ```
 
 Reads `~/meta-api/library/tracker/` (`folders.json`, `Product Tracker.csv`,
@@ -90,9 +93,7 @@ npm run dev -- --host        # then open the printed LAN URL on the phone
 1. `gh auth login` once on the Mac, then `gh repo create product-flow --public --source . --push`
    (Pages is free on public repositories; the repo holds code only, no data or secrets).
 2. Repository → Settings → Pages → Source: **GitHub Actions**.
-3. Repository → Settings → Secrets and variables → Actions → Variables: add
-   `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
-4. Every push to `main` deploys to `https://<user>.github.io/product-flow/`.
+3. Every push to `main` deploys to `https://<user>.github.io/product-flow/`.
 
 ## Install on the iPhone
 

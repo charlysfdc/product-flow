@@ -8,12 +8,12 @@ Reads (never writes) the tracker build directory:
   video_to_folder.json  video id -> folder name match
 
 Writes products, listings and posts through the Supabase REST API with the
-service-role key. Safe to re-run: rows that already exist (by product name,
+secret key (sb_secret_..., or the legacy service_role key). Safe to re-run: rows that already exist (by product name,
 by listing platform+id, by post id) are left alone, so edits made in the app
 are never overwritten. After this import the spreadsheet is retired.
 
 Usage:
-  SUPABASE_URL=https://<ref>.supabase.co SUPABASE_SERVICE_ROLE_KEY=... \
+  SUPABASE_URL=https://<ref>.supabase.co SUPABASE_SECRET_KEY=sb_secret_... \
   python3 seed/seed_tracker.py [--tracker-dir ~/meta-api/library/tracker] [--dry-run]
 """
 import argparse, csv, json, os, sys, datetime
@@ -110,9 +110,9 @@ def main():
     ap.add_argument("--tracker-dir", default=str(DEFAULT_TRACKER))
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
-    url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SECRET_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not args.dry_run and not (url and key):
-        sys.exit("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or use --dry-run).")
+        sys.exit("Set SUPABASE_URL and SUPABASE_SECRET_KEY (or use --dry-run).")
     api = Api(url or "https://dry.run", key or "", dry_run=args.dry_run)
 
     d = Path(args.tracker_dir).expanduser()

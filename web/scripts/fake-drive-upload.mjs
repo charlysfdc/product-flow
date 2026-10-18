@@ -4,6 +4,7 @@
 //   DROP=0.2 node scripts/fake-drive-upload.mjs   cuts 20% of chunk PUTs off half-way
 //   EXPOSE=0 ...                                  hides the Range header from the browser
 //   SLOW=500 ...                                  waits 500 ms before answering each chunk
+//   HANG=0.2 ...                                  takes 20% of chunks and never answers
 // Like Drive: 308 + Range while incomplete, 200 + the file at the end, bytes */N
 // asks for status, and a cut-off chunk keeps what arrived in whole 256 KiB blocks.
 import http from 'node:http'
@@ -11,6 +12,7 @@ import http from 'node:http'
 const DROP = Number(process.env.DROP ?? 0)
 const EXPOSE = process.env.EXPOSE !== '0'
 const SLOW = Number(process.env.SLOW ?? 0)
+const HANG = Number(process.env.HANG ?? 0)
 const sessions = new Map()      // id → { size, received, name }
 const cors = (origin) => ({
   'Access-Control-Allow-Origin': origin ?? '*',
@@ -50,5 +52,11 @@ http.createServer((req, res) => {
       req.socket.destroy()
     }
   })
-  req.on('end', () => { if (cut) return; s.received += got; console.log(`${s.name}: ${s.received}/${s.size}`); setTimeout(answer, SLOW) })
+  req.on('end', () => {
+    if (cut) return
+    s.received += got
+    console.log(`${s.name}: ${s.received}/${s.size}`)
+    if (Math.random() < HANG) return console.log('hang')
+    setTimeout(answer, SLOW)
+  })
 }).listen(8787, () => console.log(`fake Drive upload on :8787 (drop ${DROP}, expose Range ${EXPOSE})`))

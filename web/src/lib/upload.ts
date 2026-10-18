@@ -15,6 +15,8 @@ const CHUNK = 8 * 1024 * 1024          // a multiple of 256 KiB, as Drive requir
 const MAX_TRIES = 40                   // tries in a row without progress, counted only while the app is open (~18 min)
 const RESUME_KEY = 'pf.uploads'        // file → session URL, for picking the same file again
 const PHONE_KEY = 'pf.phone'
+const CALL_TIMEOUT = 60 * 1000         // a function call left hanging (often after the phone slept) is retried
+const STALL_MS = 60 * 1000             // a chunk with no bytes moving for this long is cut off and resumed
 
 export type UploadState = 'waiting' | 'reading' | 'uploading' | 'retrying' | 'saving' | 'done' | 'failed'
 
@@ -156,7 +158,7 @@ async function uploadOne(id: string) {
     await withRetry(id, () => callFunction('drive', {
       action: 'finish_upload', product_id: it.productId, drive_file_id: file.id, size: it.size,
       duration_s: cur.duration, width: cur.width, height: cur.height, codec: cur.codec, shot_on: phoneName() || null,
-    }))
+    }, CALL_TIMEOUT))
     forgetSession(it.file)
     patch(id, { state: 'done', note: null })
   } catch (e) {
@@ -200,6 +202,16 @@ const isNetworkError = (e: unknown) => e instanceof NetError || /network|fetch|l
 class NetError extends Error {}
 class ExpiredError extends Error {}
 
+/** iOS can drop its copy of a picked video after the app sat in the background; it can't be read any more. */
+async function stillReadable(file: File, at: number): Promise<boolean> {
+  try {
+    await file.slice(at, Math.min(at + 1, file.size)).arrayBuffer()
+    return true
+  } catch {
+    return false
+  }
+}
+
 interface DriveFileResult { id: string; name: string; size: string }
 
 /** Sends the whole file (resuming a stored session when there is one); returns Drive's file. */
@@ -217,7 +229,7 @@ async function sendFile(id: string): Promise<DriveFileResult> {
     const r = await withRetry(id, () => callFunction<{ upload_url: string }>('drive', {
       action: 'start_upload', product_id: it.productId, filename: it.name, size: it.size,
       mime: it.file.type || mimeFromName(it.name), origin: window.location.origin,
-    }))
+    }, CALL_TIMEOUT))
     url = r.upload_url
     rememberSession(it.file, it.productId, url)
   }
@@ -225,6 +237,9 @@ async function sendFile(id: string): Promise<DriveFileResult> {
   let tries = 0, stalls = 0
   for (;;) {
     const end = Math.min(offset + CHUNK, it.size)
+    if (!(await stillReadable(it.file, offset))) {
+      throw new Error(`The iPhone let go of this video at ${fmtBytes(offset)} (it does that when the app was in the background a while). Tap Upload more clips and pick the same video again: it carries on from there.`)
+    }
     try {
       const res = await putChunk(url, it.file, offset, end, it.size, (loaded) => patch(id, { sent: offset + loaded }))
       if (res.file) return res.file
@@ -256,16 +271,27 @@ async function sendFile(id: string): Promise<DriveFileResult> {
 interface Status { received?: number; file?: DriveFileResult; expired?: boolean }
 
 /** How much of the file Drive has, asked through the function (it can always read Drive's Range header). */
-const status = (url: string, size: number) => callFunction<Status>('drive', { action: 'upload_status', upload_url: url, size })
+const status = (url: string, size: number) => callFunction<Status>('drive', { action: 'upload_status', upload_url: url, size }, CALL_TIMEOUT)
 
 /** One chunk PUT. XHR rather than fetch: fetch can't report upload progress. */
 function putChunk(url: string, file: File, start: number, end: number, total: number, onProgress: (loaded: number) => void): Promise<Status> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('PUT', url)
-    xhr.timeout = 2 * 60 * 1000             // no answer for 2 minutes: treat as dropped and resume
+    xhr.timeout = 15 * 60 * 1000            // outer limit; the stall watchdog below usually acts first
     xhr.setRequestHeader('Content-Range', `bytes ${start}-${end - 1}/${total}`)
-    xhr.upload.onprogress = (e) => onProgress(e.loaded)
+    // nothing moving for a minute (a dead connection after the phone slept): cut it off and resume
+    let last = Date.now()
+    let stalled = false
+    const watchdog = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && Date.now() - last > STALL_MS) { stalled = true; xhr.abort() }
+    }, 5000)
+    const settle = () => window.clearInterval(watchdog)
+    xhr.upload.onprogress = (e) => { last = Date.now(); onProgress(e.loaded) }
+    xhr.upload.onload = () => { last = Date.now() }
+    xhr.onabort = () => { settle(); reject(new NetError(stalled ? 'stalled' : 'aborted')) }
+    xhr.onloadend = settle
+    document.addEventListener('visibilitychange', () => { last = Date.now() }, { once: true })
     xhr.onload = () => {
       if (xhr.status === 200 || xhr.status === 201) {
         try { resolve({ file: JSON.parse(xhr.responseText) as DriveFileResult }) } catch { reject(new NetError('Drive sent an unreadable answer')) }
@@ -291,7 +317,8 @@ function putChunk(url: string, file: File, start: number, end: number, total: nu
 
 /* ---------- sessions remembered per file (valid about a week at Drive) ---------- */
 
-const fileKey = (f: File) => `${f.name}|${f.size}|${f.lastModified}`
+// name and size only: picking the same video again gives a fresh copy with a new date
+const fileKey = (f: File) => `${f.name}|${f.size}`
 function sessions(): Record<string, { url: string; product: string; at: number }> {
   try { return JSON.parse(localStorage.getItem(RESUME_KEY) ?? '{}') } catch { return {} }
 }

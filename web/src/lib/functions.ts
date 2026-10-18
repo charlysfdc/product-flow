@@ -5,8 +5,8 @@
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 
-export async function callFunction<T>(name: 'identify' | 'drive', body: Record<string, unknown>): Promise<T> {
-  const { data, error } = await supabase.functions.invoke(name, { body })
+export async function callFunction<T>(name: 'identify' | 'drive', body: Record<string, unknown>, timeoutMs?: number): Promise<T> {
+  const { data, error } = await supabase.functions.invoke(name, { body, ...(timeoutMs ? { timeout: timeoutMs } : {}) })
   if (error) {
     let message = error.message
     if (error instanceof FunctionsHttpError) {

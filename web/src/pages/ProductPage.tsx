@@ -11,6 +11,8 @@ import {
 import { deadlineText } from '../components/ProductRow'
 import { Options, Sheet } from '../components/Sheet'
 import { DealCard } from '../components/DealCard'
+import { unlinkDeal } from '../lib/deals'
+import type { Deal } from '../lib/types'
 
 function fmtDate(d: string | null) {
   if (!d) return null
@@ -24,6 +26,7 @@ type SheetKind =
   | { kind: 'post'; platform: Platform }
   | { kind: 'addPlatform' }
   | { kind: 'merge' }
+  | { kind: 'unlink'; deal: Deal }
   | null
 
 export function ProductPage() {
@@ -186,7 +189,15 @@ export function ProductPage() {
       {deals.length > 0 && (
         <section>
           <h2>Brand deal{deals.length > 1 ? 's' : ''}</h2>
-          <ul className="cards">{deals.map((d) => <li key={d.id}><DealCard deal={d} productSource={p.source} /></li>)}</ul>
+          <ul className="cards">
+            {deals.map((d) => (
+              <li key={d.id}>
+                <DealCard deal={d} productSource={p.source}>
+                  <div className="actions"><Link to={`/deal/${d.id}`} className="link-btn">Open deal</Link><button className="link" onClick={() => setSheet({ kind: 'unlink', deal: d })}>Unlink (wrong product)</button></div>
+                </DealCard>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 
@@ -286,6 +297,25 @@ export function ProductPage() {
           onRemove={removePost}
           onClose={close}
         />
+      )}
+
+      {sheet?.kind === 'unlink' && (
+        <Sheet title="Unlink this deal?" onClose={close}>
+          <p>
+            {sheet.deal.link_added?.created_product
+              ? <>This product was created from the deal and will be removed; the deal goes back to the list.</>
+              : <>Only what the link added is removed (its ASIN listing, post and the fields it filled). Nothing set earlier is touched.</>}
+          </p>
+          <div className="actions">
+            <button className="primary" disabled={busy} onClick={() => run('Unlink', async () => {
+              const created = sheet.deal.link_added?.created_product
+              await unlinkDeal(supabase, sheet.deal)
+              close()
+              if (created) navigate('/', { replace: true })
+            })}>Unlink</button>
+            <button className="link" onClick={close}>Cancel</button>
+          </div>
+        </Sheet>
       )}
 
       {sheet?.kind === 'merge' && (

@@ -11,7 +11,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { parseCsv } from './csv'
-import { dealState, type Deal, type Product, type ProductStatus } from './types'
+import { dealState, type Deal, type LinkAdded, type Product, type ProductStatus } from './types'
 
 export interface DealInput {
   platform: 'amazon_us'
@@ -137,22 +137,29 @@ export function suggestProducts(deal: Pick<Deal, 'brand' | 'title'>, products: P
  * listing and (if published) an Amazon post exist. The source is set only when
  * it is still unknown; a product marked Bought (or anything else) keeps it.
  */
-export async function linkDealToProduct(client: SupabaseClient, deal: Deal, product: Product): Promise<{ postCreated: boolean }> {
+export async function linkDealToProduct(client: SupabaseClient, deal: Deal, product: Product, extra: LinkAdded = {}): Promise<{ postCreated: boolean }> {
+  const added: LinkAdded = { ...extra }
   const patch: Partial<Product> = {}
-  if (product.source === 'unknown') patch.source = 'amazon_sample'
-  if (!product.brand && deal.brand) patch.brand = deal.brand
-  if (!product.received_at && deal.received_at) patch.received_at = day(deal.received_at)
-  if (!product.product_image_url && deal.image_url) patch.product_image_url = deal.image_url
-  if (Object.keys(patch).length) throwIf('update product', (await client.from('products').update(patch).eq('id', product.id)).error)
+  const before: NonNullable<LinkAdded['product_before']> = {}
+  if (product.source === 'unknown') { patch.source = 'amazon_sample'; before.source = product.source }
+  if (!product.brand && deal.brand) { patch.brand = deal.brand; before.brand = product.brand }
+  if (!product.received_at && deal.received_at) { patch.received_at = day(deal.received_at); before.received_at = product.received_at }
+  if (!product.product_image_url && deal.image_url) { patch.product_image_url = deal.image_url; before.product_image_url = product.product_image_url }
+  if (Object.keys(patch).length) {
+    throwIf('update product', (await client.from('products').update(patch).eq('id', product.id)).error)
+    added.product_before = before
+  }
 
   if (deal.asin) {
     const { data: l, error } = await client.from('listings').select('id').eq('product_id', product.id).eq('platform', 'amazon_us').eq('external_id', deal.asin).limit(1)
     throwIf('read listing', error)
     if (!l?.length) {
-      throwIf('add listing', (await client.from('listings').insert({
+      const ins = await client.from('listings').insert({
         product_id: product.id, platform: 'amazon_us', external_id: deal.asin,
         url: `https://www.amazon.com/dp/${deal.asin}`, availability: 'exact', checked_at: day(deal.deal_updated_at),
-      })).error)
+      }).select('id').single()
+      throwIf('add listing', ins.error)
+      added.listing_id = ins.data!.id
     }
   }
 
@@ -161,13 +168,42 @@ export async function linkDealToProduct(client: SupabaseClient, deal: Deal, prod
     const { data: posts, error } = await client.from('posts').select('id').eq('product_id', product.id).eq('platform', 'amazon_us').eq('status', 'posted').limit(1)
     throwIf('read posts', error)
     if (!posts?.length) {
-      throwIf('add post', (await client.from('posts').insert({ product_id: product.id, platform: 'amazon_us', status: 'posted', posted_at: day(deal.published_at) })).error)
+      const ins = await client.from('posts').insert({ product_id: product.id, platform: 'amazon_us', status: 'posted', posted_at: day(deal.published_at) }).select('id').single()
+      throwIf('add post', ins.error)
+      added.post_id = ins.data!.id
       postCreated = true
     }
   }
 
-  throwIf('link deal', (await client.from('deals').update({ product_id: product.id, match_status: 'matched' }).eq('id', deal.id)).error)
+  let res = await client.from('deals').update({ product_id: product.id, match_status: 'matched', link_added: added }).eq('id', deal.id)
+  if (res.error?.code === 'PGRST204') res = await client.from('deals').update({ product_id: product.id, match_status: 'matched' }).eq('id', deal.id) // migration 0003 not applied yet
+  throwIf('link deal', res.error)
   return { postCreated }
+}
+
+/**
+ * Undo a link: remove only what the link created (its listing, its post, the
+ * product fields it filled, or the whole product if the deal created it) and
+ * put the deal back to needs_review (received) or waiting.
+ */
+export async function unlinkDeal(client: SupabaseClient, deal: Deal): Promise<void> {
+  const added = deal.link_added ?? {}
+  if (deal.product_id) {
+    if (added.created_product) {
+      throwIf('remove product', (await client.from('products').delete().eq('id', deal.product_id)).error)
+    } else {
+      if (added.listing_id) throwIf('remove listing', (await client.from('listings').delete().eq('id', added.listing_id)).error)
+      if (added.post_id) throwIf('remove post', (await client.from('posts').delete().eq('id', added.post_id)).error)
+      if (added.product_before && Object.keys(added.product_before).length) {
+        throwIf('restore product', (await client.from('products').update(added.product_before).eq('id', deal.product_id)).error)
+      }
+    }
+  }
+  const received_at = added.stamped_received ? null : deal.received_at
+  throwIf('unlink deal', (await client.from('deals').update({
+    product_id: null, link_added: null, received_at,
+    match_status: received_at ? 'needs_review' : 'waiting',
+  }).eq('id', deal.id)).error)
 }
 
 function nameFromTitle(title: string | null, asin: string | null): string {
@@ -191,7 +227,8 @@ function statusFromDeal(d: Pick<Deal, 'received_at' | 'video_created_at' | 'publ
  */
 export async function receiveDeal(client: SupabaseClient, deal: Deal, overrides: Partial<Pick<Product, 'name' | 'status' | 'source'>> = {}): Promise<Product> {
   const received = deal.received_at ?? new Date().toISOString()
-  if (!deal.received_at) {
+  const stamped = !deal.received_at
+  if (stamped) {
     throwIf('stamp received', (await client.from('deals').update({ received_at: received }).eq('id', deal.id)).error)
     deal = { ...deal, received_at: received }
   }
@@ -209,7 +246,7 @@ export async function receiveDeal(client: SupabaseClient, deal: Deal, overrides:
   if (res.error?.code === '23505') res = await client.from('products').insert({ ...row, name: `${base} (${deal.asin ?? deal.external_id.slice(0, 8)})` }).select('*').single()
   throwIf('create product', res.error)
   const product = res.data as Product
-  await linkDealToProduct(client, deal, product)
+  await linkDealToProduct(client, deal, product, { created_product: true, stamped_received: stamped })
   return product
 }
 

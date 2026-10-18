@@ -77,7 +77,17 @@ export interface Deal {
   deal_updated_at: string | null
   status_raw: string | null
   match_status: DealMatchStatus
+  link_added: LinkAdded | null
   imported_at: string
+}
+
+/** What linking a deal to a product created; Unlink undoes exactly this. */
+export interface LinkAdded {
+  listing_id?: string
+  post_id?: string
+  product_before?: Partial<Pick<Product, 'source' | 'brand' | 'received_at' | 'product_image_url'>>
+  created_product?: boolean
+  stamped_received?: boolean
 }
 
 export const DEAL_STATE_LABEL: Record<DealState, string> = {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { createProductFromDeal, ignoreDeal, linkDealToProduct, receiveDeal, selectAll, suggestProducts } from '../lib/deals'
+import { createProductFromDeal, ignoreDeal, linkDealToProduct, receiveDeal, selectAll, suggestProducts, unlinkDeal } from '../lib/deals'
 import { STATUS_LABEL, type Deal, type Product } from '../lib/types'
 import { DealCard } from '../components/DealCard'
 import { Options, Sheet } from '../components/Sheet'
@@ -16,6 +16,8 @@ export function DealPage() {
   const [busy, setBusy] = useState(false)
   const [picking, setPicking] = useState(false)
   const [arrived, setArrived] = useState(false)
+  const [confirm, setConfirm] = useState<Product | null>(null)
+  const [confirmUnlink, setConfirmUnlink] = useState(false)
   const [all, setAll] = useState<Product[] | null>(null)
   const [q, setQ] = useState('')
 
@@ -71,6 +73,7 @@ export function DealPage() {
         <section>
           <h2>Linked product</h2>
           <ul className="list"><li><Link to={`/product/${linked.id}`} className="row"><span className="row-main"><span className="row-title">{linked.name}</span><span className="row-sub">{STATUS_LABEL[linked.status]}</span></span><span className="chev">›</span></Link></li></ul>
+          <div className="actions"><button className="link" disabled={busy} onClick={() => setConfirmUnlink(true)}>Unlink (wrong product)</button></div>
         </section>
       ) : deal.match_status === 'ignored' ? (
         <section><p className="muted">Ignored. It stays out of the lists.</p></section>
@@ -95,10 +98,7 @@ export function DealPage() {
             <ul className="list">
               {suggestions.map((p) => (
                 <li key={p.id}>
-                  <button className="row row-btn" disabled={busy} onClick={() => run('Link', async () => {
-                    await linkDealToProduct(supabase, deal, p)
-                    return `/product/${p.id}`
-                  })}>
+                  <button className="row row-btn" disabled={busy} onClick={() => setConfirm(p)}>
                     <span className="row-main"><span className="row-title">Same as {p.name}?</span><span className="row-sub">{STATUS_LABEL[p.status]}{p.brand ? ` · ${p.brand}` : ''}</span></span>
                     <span className="chev" aria-hidden>›</span>
                   </button>
@@ -122,6 +122,39 @@ export function DealPage() {
             })}>Ignore this deal</button>
           </div>
         </section>
+      )}
+
+      {confirm && (
+        <Sheet title="Link this deal?" onClose={() => setConfirm(null)}>
+          <p>Link <b>{deal.brand ?? deal.title}</b> to <b>{confirm.name}</b>?</p>
+          <p className="muted small">The product gets this deal's ASIN listing and, where empty, its brand, image and received date. You can unlink later.</p>
+          <div className="actions">
+            <button className="primary" disabled={busy} onClick={() => run('Link', async () => {
+              await linkDealToProduct(supabase, deal, confirm)
+              return `/product/${confirm.id}`
+            })}>Yes, link</button>
+            <button className="link" onClick={() => setConfirm(null)}>Cancel</button>
+          </div>
+        </Sheet>
+      )}
+
+      {confirmUnlink && linked && (
+        <Sheet title="Unlink this deal?" onClose={() => setConfirmUnlink(false)}>
+          <p>
+            {deal.link_added?.created_product
+              ? <>The product <b>{linked.name}</b> was created from this deal and will be removed.</>
+              : <>Only what the link added to <b>{linked.name}</b> is removed (its ASIN listing, post and fields it filled). Nothing set earlier is touched.</>}
+          </p>
+          <div className="actions">
+            <button className="primary" disabled={busy} onClick={() => run('Unlink', async () => {
+              await unlinkDeal(supabase, deal)
+              setLinked(null)
+              setDeal({ ...deal, product_id: null, link_added: null, match_status: deal.received_at && !deal.link_added?.stamped_received ? 'needs_review' : 'waiting' })
+              setConfirmUnlink(false)
+            })}>Unlink</button>
+            <button className="link" onClick={() => setConfirmUnlink(false)}>Cancel</button>
+          </div>
+        </Sheet>
       )}
 
       {arrived && (
@@ -148,10 +181,7 @@ export function DealPage() {
             <ul className="list">
               {hits.map((p) => (
                 <li key={p.id}>
-                  <button className="row row-btn" disabled={busy} onClick={() => run('Link', async () => {
-                    await linkDealToProduct(supabase, deal, p)
-                    return `/product/${p.id}`
-                  })}>
+                  <button className="row row-btn" disabled={busy} onClick={() => { setPicking(false); setConfirm(p) }}>
                     <span className="row-main"><span className="row-title">{p.name}</span><span className="row-sub">{STATUS_LABEL[p.status]}</span></span>
                     <span className="chev" aria-hidden>›</span>
                   </button>

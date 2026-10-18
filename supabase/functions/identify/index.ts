@@ -157,9 +157,15 @@ async function viaJina(url: string): Promise<{ title: string | null; image: stri
   return { title, image, brand: amazonBrand(text), text }
 }
 
+/**
+ * The Claude client. A key that belongs to no workspace also needs the workspace
+ * id (optional secret ANTHROPIC_WORKSPACE_ID); a workspace key works on its own.
+ */
 function anthropic(): Anthropic | null {
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY')
-  return apiKey ? new Anthropic({ apiKey }) : null
+  if (!apiKey) return null
+  const workspace = Deno.env.get('ANTHROPIC_WORKSPACE_ID')
+  return new Anthropic({ apiKey, ...(workspace ? { defaultHeaders: { 'anthropic-workspace-id': workspace } } : {}) })
 }
 
 /**
@@ -438,10 +444,9 @@ Read only what is printed on the box or label. Leave a field empty rather than g
 The name is how the product's folder will be called: brand, then model or product line, then what the product is, with no marketing words. Examples: "Nextorch P82C Flashlight", "Plaud Notepen", "Baskbed Comforter", "Wonderskin Brow Stain".`
 
 async function byPhoto(image: string, mediaType: string): Promise<Identification> {
-  const apiKey = Deno.env.get('ANTHROPIC_API_KEY')
-  if (!apiKey) throw new HttpError(500, 'Reading photos needs the Anthropic API key in the Supabase Edge Function secrets (ANTHROPIC_API_KEY).')
+  const client = anthropic()
+  if (!client) throw new HttpError(500, 'Reading photos needs the Anthropic API key in the Supabase Edge Function secrets (ANTHROPIC_API_KEY).')
   if (image.length > 7_000_000) throw new HttpError(400, 'That photo is too large.')
-  const client = new Anthropic({ apiKey })
   // deno-lint-ignore no-explicit-any
   const params: any = {
     model: 'claude-opus-5-5',

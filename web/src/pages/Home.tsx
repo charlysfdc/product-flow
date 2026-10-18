@@ -2,13 +2,8 @@ import { useMemo, useState } from 'react'
 import { useAuth } from '../lib/auth'
 import { useSnapshot } from '../lib/data'
 import type { Job, Platform, Product } from '../lib/types'
-import { PLATFORM_LABEL } from '../lib/types'
+import { PLATFORM_LABEL, PLATFORM_ORDER } from '../lib/types'
 import { ProductRow, daysUntil } from '../components/ProductRow'
-
-const PLATFORM_ORDER: Platform[] = [
-  'amazon_us', 'amazon_ca', 'amazon_uk', 'amazon_de', 'amazon_nl',
-  'tiktok_shop', 'instagram', 'facebook', 'youtube', 'pinterest',
-]
 
 type View =
   | { kind: 'search'; search: Product[] }

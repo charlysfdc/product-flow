@@ -85,3 +85,36 @@ button.link { background: none; border: 0; color: var(--accent); padding: 6px 0;
 .card-title { font-weight: 600; }
 .card-body { margin-top: 2px; word-break: break-word; }
 .notes { white-space: pre-line; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; margin: 0; }
+
+/* tappable chips, checklist, sheets, forms */
+.chip-btn { border: 0; font: inherit; font-size: 14px; cursor: pointer; }
+.chip-ask { background: #f3e3c5; color: #5a3d05; }
+.row-btn { width: 100%; background: none; border: 0; text-align: left; font: inherit; color: var(--text); cursor: pointer; }
+.row-main { display: block; }
+.row-title, .row-sub { display: block; }
+.row-sub { display: flex; }
+.box { width: 26px; height: 26px; border-radius: 8px; border: 2px solid var(--line); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; flex: none; }
+.box-on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+.actions .primary { width: 100%; }
+button.secondary { background: var(--card); color: var(--accent); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; font-weight: 600; }
+button.secondary:disabled, button.link:disabled { opacity: 0.5; }
+
+.sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: flex-end; justify-content: center; z-index: 10; }
+.sheet { background: var(--bg); color: var(--text); width: 100%; max-width: 640px; max-height: 85vh; overflow-y: auto; border-radius: 18px 18px 0 0; padding: 12px 16px calc(16px + env(safe-area-inset-bottom)); }
+.sheet-head { display: flex; justify-content: space-between; align-items: center; }
+.sheet-head h2 { margin: 6px 0; text-transform: none; letter-spacing: 0; font-size: 18px; color: var(--text); }
+.options { list-style: none; margin: 8px 0; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.options li + li { border-top: 1px solid var(--line); }
+.option { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; text-align: left; background: none; border: 0; padding: 12px 14px; color: var(--text); font: inherit; cursor: pointer; }
+.option-on { background: var(--chip); }
+.option-label { font-weight: 600; }
+.option-help { grid-column: 1; color: var(--muted); font-size: 14px; }
+.option .tick { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--accent); font-weight: 700; }
+.form { display: grid; gap: 12px; margin-top: 12px; }
+.form label { display: grid; gap: 4px; font-size: 15px; }
+.form input { font: inherit; font-size: 17px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+.form .primary { max-width: none; }
+.sheet .search { margin-top: 4px; }
+.sheet .list { margin-top: 8px; }
+.card .link { padding: 4px 0 0; }

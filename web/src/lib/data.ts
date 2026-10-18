@@ -72,6 +72,8 @@ export interface ProductDetail {
 export function useProduct(id: string | undefined) {
   const [detail, setDetail] = useState<ProductDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [tick, setTick] = useState(0)
+  const reload = useCallback(() => setTick((t) => t + 1), [])
 
   useEffect(() => {
     if (!id) return
@@ -99,7 +101,7 @@ export function useProduct(id: string | undefined) {
     return () => {
       cancelled = true
     }
-  }, [id])
+  }, [id, tick])
 
-  return { detail, error }
+  return { detail, error, reload }
 }

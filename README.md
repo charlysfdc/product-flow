@@ -65,7 +65,7 @@ In Supabase → Authentication → URL Configuration set the Site URL to the
 deployed app URL and add these Redirect URLs:
 
 - `http://localhost:5173/**`
-- `https://<your-pages-host>/product-flow/**`
+- `https://charlysfdc.github.io/product-flow/**`
 
 ### 4. Seed from the tracker (once)
 
@@ -96,7 +96,7 @@ npm run dev -- --host        # then open the printed LAN URL on the phone
 1. `gh auth login` once on the Mac, then `gh repo create product-flow --public --source . --push`
    (Pages is free on public repositories; the repo holds code only, no data or secrets).
 2. Repository → Settings → Pages → Source: **GitHub Actions**.
-3. Every push to `main` deploys to `https://<user>.github.io/product-flow/`.
+3. Every push to `main` deploys to `https://charlysfdc.github.io/product-flow/`.
 
 ## Install on the iPhone
 

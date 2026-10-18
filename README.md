@@ -82,6 +82,16 @@ Re-running only adds rows that are missing. After this the spreadsheet is
 retired; nothing reads or writes it. `--dry-run` shows the counts without
 touching the database.
 
+### 5. Drive folder links (once, on the Mac)
+
+```bash
+SUPABASE_URL=https://<ref>.supabase.co SUPABASE_SECRET_KEY='sb_secret_...' python3 seed/backfill_drive_ids.py
+```
+
+Reads each product folder's Drive ID from the Google Drive for desktop mount
+(extended attribute `com.google.drivefs.item-id#S`) so the Product screen can
+open the folder in Drive. Done on 18 Oct 2026 for all 259 folders.
+
 ## Run locally
 
 ```bash
@@ -105,7 +115,7 @@ Screen**. It opens full-screen like an app and stays signed in.
 
 ## Phases
 
-- **0 Foundation** (this): schema, seed, sign-in, Home lists, read-only Product screen.
+- **0 Foundation** (this): schema, seed, sign-in, Home lists, Product screen with status/source tags, posted checklist per platform, Drive links and merge.
 - 1 Intake: add product by barcode/photo/link, identify job.
 - 2 Film: upload clips from the phone straight into Drive.
 - 3 Edit: cloud worker cuts, captions and thumbnails.

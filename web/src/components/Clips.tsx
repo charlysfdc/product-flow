@@ -8,7 +8,7 @@ import {
 } from '../lib/upload'
 
 /** One line under every Upload clips button: how to make the iPhone send the original file. */
-export const ORIGINAL_TIP = 'For full quality: in the photo picker tap Options, then under Format pick Current.'
+export const ORIGINAL_TIP = 'For full quality: in the photo picker tap Options, pick Format: Current. A long video takes a while to get ready; wait for its circle to fill before tapping ✓.'
 
 export const PHONE_SUGGESTIONS = ['Charly’s iPhone', 'Zanje’s iPhone']
 
@@ -132,7 +132,7 @@ export function UploadPanel({ productId }: { productId: string }) {
       {converted.length > 0 && (
         <p className="flag">
           {converted.length === 1 ? 'This clip came' : `${converted.length} clips came`} through as H.264, so the photo picker probably made a smaller copy
-          (unless the camera is set to Most Compatible). Next time: {ORIGINAL_TIP.replace(/^For full quality: /, '')}
+          (unless the camera is set to Most Compatible). Next time, in the photo picker tap Options and pick Format: Current.
         </p>
       )}
     </section>

@@ -55,6 +55,11 @@ export interface Media {
   filename: string
   width: number | null
   height: number | null
+  duration_s: number | null
+  shot_on: string | null       // which phone ("Charly’s iPhone"); null when it was added in Drive
+  uploaded_by: string | null
+  size_bytes?: number | null   // migration 0006
+  codec?: string | null        // migration 0006: hevc, h264, prores
   uploaded_at: string
 }
 

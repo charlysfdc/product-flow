@@ -8,6 +8,7 @@ import { PLATFORM_LABEL, PLATFORM_ORDER } from '../lib/types'
 import { ProductRow, Thumb, daysUntil, deadlineText } from '../components/ProductRow'
 import { Section } from '../components/Section'
 import { IconCameraPlus, IconGear } from '../components/Icons'
+import { UploadButton } from '../components/Clips'
 
 /** Deal cards shown in "today" before the rest go to the Answer row. */
 const ANSWER_CARDS = 2
@@ -190,7 +191,9 @@ export function Home() {
                     </span>
                   </Link>
                   <div className="go">
-                    {step.button
+                    {p.status === 'received'
+                      ? <UploadButton product={p} className="pri" onStarted={() => navigate(`/product/${p.id}`)} />
+                      : step.button
                       ? <button className="pri" disabled={busy === p.id} onClick={() => advance(p)}>{step.button}</button>
                       : <Link className="pri" to={`/product/${p.id}`}>{p.status === 'ready' ? 'Mark posted' : 'Open'}</Link>}
                     {step.button || !p.drive_folder_id

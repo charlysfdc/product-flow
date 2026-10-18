@@ -14,7 +14,7 @@ const products = [
   P('p1', 'Coconut Curl Cream', { brand: 'Kitsch', status: 'ready', source: 'tiktok_sample', deadline: inDays(0), drive_folder_id: 'x1' }),
   P('p2', 'Wonderskin Brow Stain', { brand: 'Wonderskin', status: 'ready', source: 'tiktok_sample', deadline: inDays(1), drive_folder_id: 'x2' }),
   P('p3', 'Wonderskin Blush Stick', { brand: 'Wonderskin', status: 'filmed', source: 'tiktok_sample', deadline: inDays(2) }),
-  P('p4', 'Baskbed comforter', { brand: 'Baskbed', status: 'received' }),
+  P('p4', 'Baskbed comforter', { brand: 'Baskbed', status: 'received', source: 'tiktok_sample', deadline: inDays(3) }),
   P('p5', 'MR MIRYE shower steamers', { brand: 'MR MIRYE', status: 'received', received_at: '2026-10-09' }),
   P('p6', 'Nextorch P82C Flashlight', { brand: 'NEXTORCH', status: 'filmed', received_at: '2026-09-26', drive_folder_id: 'x6', drive_folder_name: 'Nextorch P82C Flashlight' }),
   P('p7', 'Plaud Notepen', { brand: 'Plaud', status: 'filmed' }),
@@ -43,7 +43,41 @@ const deals = [
   deal('d3', 'NEXTORCH', 'NEXTORCH P82C Rechargeable Flashlight 1600 Lumens', { product_id: 'p6', match_status: 'matched', received_at: '2026-09-26T00:00:00Z' }),
   deal('d4', 'Govee', 'Govee RGBIC Floor Lamp'),
 ]
-const tables: Record<string, Record<string, unknown>[]> = { products, listings, posts, deals, jobs: [], media: [], profiles: [] }
+const media = [
+  { id: 'm1', product_id: 'p6', kind: 'raw_clip', drive_file_id: 'fx1', filename: 'IMG_4412.MOV', duration_s: 48.2, width: 1080, height: 1920, shot_on: 'Charly’s iPhone', uploaded_by: 'u', size_bytes: 412_000_000, codec: 'hevc', uploaded_at: '2026-10-11T10:00:00Z' },
+  { id: 'm2', product_id: 'p6', kind: 'raw_clip', drive_file_id: 'fx2', filename: 'IMG_4413.MOV', duration_s: 131, width: 1920, height: 1080, shot_on: null, uploaded_by: null, size_bytes: 1_310_000_000, codec: null, uploaded_at: '2026-10-11T10:05:00Z' },
+]
+const tables: Record<string, Record<string, unknown>[]> = { products, listings, posts, deals, jobs: [], media, profiles: [] }
+
+/** Clip uploads in demo mode go to scripts/fake-drive-upload.mjs on :8787 (start it first). */
+async function demoDrive(body: Record<string, unknown>): Promise<Response> {
+  const fake = 'http://localhost:8787'
+  try {
+    if (body.action === 'start_upload') {
+      const r = await fetch(`${fake}/start?size=${body.size}&name=${encodeURIComponent(String(body.filename))}`, { method: 'POST' })
+      return json({ upload_url: (await r.json()).url, folder_id: 'demo', raw_folder_id: 'demo-raw' })
+    }
+    if (body.action === 'upload_status') {
+      const r = await fetch(String(body.upload_url), { method: 'PUT', headers: { 'Content-Range': `bytes */${body.size}` } })
+      if (r.status === 404) return json({ expired: true })
+      if (r.ok) return json({ received: body.size, file: await r.json() })
+      const range = r.headers.get('Range')
+      return json({ received: range ? Number(range.split('-')[1]) + 1 : 0 })
+    }
+  } catch {
+    return json({ error: 'Start the fake upload server: node scripts/fake-drive-upload.mjs' }, { status: 502 })
+  }
+  if (body.action === 'finish_upload') {
+    media.push({ id: `m${Date.now()}`, product_id: String(body.product_id), kind: 'raw_clip', drive_file_id: String(body.drive_file_id), filename: String(body.drive_file_id).replace(/^fake-/, ''),
+      duration_s: body.duration_s as number, width: body.width as number, height: body.height as number, shot_on: (body.shot_on as string) ?? null, uploaded_by: 'u', size_bytes: body.size as number, codec: (body.codec as string) ?? null, uploaded_at: new Date().toISOString() })
+    const p = products.find((x) => x.id === body.product_id)
+    const changed = p && (p.status === 'received' || p.status === 'expected')
+    if (p && changed) p.status = 'filmed'
+    return json({ media_id: 'm', size: body.size, status_changed: Boolean(changed) })
+  }
+  const raw = media.filter((m) => m.product_id === body.product_id && m.kind === 'raw_clip').length
+  return json({ added: 0, raw, finished: 0, status_changed: false })
+}
 
 function applyFilters(rows: Record<string, unknown>[], params: URLSearchParams) {
   let out = rows
@@ -72,6 +106,7 @@ export const demoFetch: typeof fetch = async (input, init) => {
     const body = JSON.parse(String(init?.body ?? '{}'))
     if (url.pathname.endsWith('/identify')) return json({ name: 'Nextorch P91 Flashlight', brand: 'NEXTORCH', variant: 'Black', upc: body.upc ?? null, asin: null, title: 'NEXTORCH P91 Tactical Flashlight', image_url: null, url: body.url ?? null, platform: null, tiktok_product_id: null, confidence: 'high', note: null })
     if (body.action === 'status') return json({ connected: false, email: null, products_folder_id: null })
+    if (body.action?.endsWith('upload') || body.action === 'upload_status' || body.action === 'sync') return demoDrive(body)
     return json({ folder_id: 'demo', folder_name: 'demo', created: true, media_id: 'm', drive_file_id: 'f' })
   }
   const m = url.pathname.match(/\/rest\/v1\/(\w+)/)

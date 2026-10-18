@@ -9,7 +9,9 @@ import {
   type Platform, type Post, type Product, type ProductSource, type ProductStatus,
 } from '../lib/types'
 import { Thumb, deadlineText } from '../components/ProductRow'
-import { makeDriveFolder } from '../lib/functions'
+import { makeDriveFolder, syncFromDrive } from '../lib/functions'
+import { ClipList, ORIGINAL_TIP, UploadButton, UploadPanel } from '../components/Clips'
+import { useUploads } from '../lib/upload'
 import { Options, Sheet } from '../components/Sheet'
 import { DealCard } from '../components/DealCard'
 import { unlinkDeal } from '../lib/deals'
@@ -21,6 +23,18 @@ function fmtDate(d: string | null) {
 }
 const fmtShort = (d: string | null) => (d ? new Date(d.length === 10 ? d + 'T00:00:00' : d).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : null)
 const today = () => new Date().toISOString().slice(0, 10)
+
+// Sync from Drive runs by itself when a product opens, at most this often per product.
+const AUTO_SYNC_MS = 10 * 60 * 1000
+function syncedRecently(id: string): boolean {
+  try {
+    const at = JSON.parse(localStorage.getItem('pf.synced') ?? '{}') as Record<string, number>
+    if (Date.now() - (at[id] ?? 0) < AUTO_SYNC_MS) return true
+    at[id] = Date.now()
+    localStorage.setItem('pf.synced', JSON.stringify(at))
+  } catch { /* storage blocked: sync anyway */ }
+  return false
+}
 
 type SheetKind =
   | { kind: 'status' }
@@ -39,6 +53,37 @@ export function ProductPage() {
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const close = useCallback(() => setSheet(null), [])
+  const [syncing, setSyncing] = useState(false)
+  const [syncNote, setSyncNote] = useState<string | null>(null)
+
+  // reload when one of this product's uploads lands
+  const uploads = useUploads()
+  const landed = uploads.filter((u) => u.productId === id && u.state === 'done').length
+  useEffect(() => { if (landed) reload() }, [landed, reload])
+
+  const sync = useCallback(async (manual: boolean) => {
+    if (!id) return
+    setSyncing(true)
+    if (manual) setSyncNote(null)
+    try {
+      const r = await syncFromDrive(id)
+      if (r.added || r.status_changed) reload()
+      if (manual || r.added) {
+        setSyncNote(r.note ?? (r.added
+          ? `Found ${r.added} new file${r.added === 1 ? '' : 's'} in Drive.`
+          : `Nothing new: ${r.raw} clip${r.raw === 1 ? '' : 's'} in raw, ${r.finished} in finished.`))
+      }
+    } catch (e) {
+      if (manual) setSyncNote(`Sync failed: ${(e as Error).message}`)
+    } finally {
+      setSyncing(false)
+    }
+  }, [id, reload])
+
+  const folderId = detail?.product.drive_folder_id
+  useEffect(() => {
+    if (id && folderId && !syncedRecently(id)) sync(false)
+  }, [id, folderId, sync])
 
   const run = useCallback(async (label: string, fn: () => Promise<void>) => {
     setBusy(true)
@@ -137,6 +182,8 @@ export function ProductPage() {
   const plannedAmazon = unposted.some((c) => c.platform.startsWith('amazon'))
   const messaged = deals.find((d) => d.message_sent_at)
   const intake = media.filter((m) => m.kind === 'intake_photo')
+  const clips = media.filter((m) => m.kind === 'raw_clip')
+  const finished = media.filter((m) => m.kind === 'finished_vertical' || m.kind === 'finished_horizontal')
 
   // One next step, from the status. Each has one main button and one smaller action.
   const folderLink = (label: string) => folderUrl
@@ -149,8 +196,9 @@ export function ProductPage() {
         return { eyebrow: 'Next step', title: 'Wait for it to arrive', body: `Tap when the box is here.${deadline}`,
           main: <button className="pri" disabled={busy} onClick={() => setStatus('received')}>It arrived</button> }
       case 'received':
-        return { eyebrow: 'Next step', title: 'Film it', body: `${folderUrl ? 'Clips go in the raw folder in Drive.' : 'There is no Drive folder for it yet.'}${deadline}`,
-          main: folderLink('Open the Drive folder'), subLabel: 'Filmed it?', sub: <button disabled={busy} onClick={() => setStatus('filmed')}>Mark as filmed ›</button> }
+        return { eyebrow: 'Next step', title: 'Film it', body: `Then upload the clips from Photos; they go straight into the raw folder in Drive.${deadline}`,
+          main: <><UploadButton product={p} className="pri" /><p className="tip">{ORIGINAL_TIP}</p></>,
+          subLabel: 'Clips already in Drive?', sub: <button disabled={syncing} onClick={() => sync(true)}>{syncing ? 'Looking…' : 'Sync from Drive ›'}</button> }
       case 'filmed':
       case 'editing':
         return { eyebrow: p.status === 'editing' ? 'Being edited' : 'Next step', title: plannedAmazon ? 'Edit it and upload to Amazon' : 'Edit it',
@@ -207,7 +255,10 @@ export function ProductPage() {
         <p>{next.body}</p>
         {next.main}
         {(next.subLabel || next.sub) && <div className="sub"><span>{next.subLabel}</span>{next.sub}</div>}
+        {p.status === 'received' && syncNote && <p>{syncNote}</p>}
       </section>
+
+      <UploadPanel productId={p.id} />
 
       <div className="chips">
         <button className={`chip chip-btn status-${p.status}`} onClick={() => setSheet({ kind: 'status' })}>{STATUS_LABEL[p.status]} ▾</button>
@@ -239,6 +290,24 @@ export function ProductPage() {
           )}
         </div>
       </section>
+
+      <section>
+        <h2>Clips <span className="count">{clips.length}</span></h2>
+        <ClipList media={clips} empty={p.status === 'received' || p.status === 'expected' ? 'Nothing filmed yet.' : 'No clips recorded in the app. If they are in Drive, tap Sync from Drive.'} />
+        <div className="actions">
+          <UploadButton product={p} className="secondary" label={clips.length ? 'Upload more clips' : 'Upload clips'} />
+          <button className="secondary" disabled={syncing} onClick={() => sync(true)}>{syncing ? 'Looking in Drive…' : 'Sync from Drive'}</button>
+        </div>
+        {p.status !== 'received' && syncNote && <p className="sync-note">{syncNote}</p>}
+        {p.status !== 'received' && <p className="tip">{ORIGINAL_TIP}</p>}
+      </section>
+
+      {finished.length > 0 && (
+        <section>
+          <h2>Finished videos <span className="count">{finished.length}</span></h2>
+          <ClipList media={finished} empty="" />
+        </section>
+      )}
 
       {(p.product_image_url || intake.length > 0) && (
         <section>

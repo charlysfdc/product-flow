@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase'
 import { importDeals, type ImportSummary } from '../lib/deals'
 import { driveStatus, listFolders, setProductsFolder, type DriveStatus, type FolderListing } from '../lib/functions'
 import { Sheet } from '../components/Sheet'
+import { PhoneSheet } from '../components/Clips'
+import { phoneName, setPhoneName } from '../lib/upload'
 
 export function Settings() {
   const { session, signOut, connectDrive, notice } = useAuth()
@@ -12,6 +14,8 @@ export function Settings() {
   const [driveError, setDriveError] = useState<string | null>(null)
   const [picking, setPicking] = useState(false)
   const [tick, setTick] = useState(0)
+  const [phone, setPhone] = useState(phoneName())
+  const [namingPhone, setNamingPhone] = useState(false)
   useEffect(() => {
     driveStatus().then(setDrive, (e: Error) => setDriveError(e.message))
   }, [notice, tick])
@@ -54,11 +58,28 @@ export function Settings() {
       </section>
 
       <section>
+        <h2>This phone</h2>
+        <div className="card">
+          <div className="card-title">{phone ? `This phone is: ${phone}` : 'This phone has no name yet'}</div>
+          <p className="muted small">Clips uploaded from here are marked with this name, so you can tell which iPhone filmed them. Saved on this phone only.</p>
+          <button className="secondary" onClick={() => setNamingPhone(true)}>{phone ? 'Change the name' : 'Name this phone'}</button>
+        </div>
+      </section>
+
+      {namingPhone && (
+        <PhoneSheet
+          intro="Pick or type a name for the phone you are holding."
+          onClose={() => setNamingPhone(false)}
+          onPick={(name) => { setPhoneName(name); setPhone(name); setNamingPhone(false) }}
+        />
+      )}
+
+      <section>
         <h2>Google Drive</h2>
         <div className="card">
           <div className="card-title">{drive?.connected ? `Connected${drive.email ? ` as ${drive.email}` : ''}` : drive ? 'Not connected' : driveError ? 'Status unknown' : 'Checking…'}</div>
           <p className="muted small">
-            Add product makes a folder in Content Library/Products for each new product and saves the photo of the box there.
+            Add product makes a folder in Content Library/Products for each new product and saves the photo of the box there; Upload clips puts videos in its raw folder.
             This needs your permission once; Google then asks nothing again.
           </p>
           {driveError && <p className="error small">{driveError}</p>}

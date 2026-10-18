@@ -7,6 +7,7 @@ import { DealPage } from './pages/DealPage'
 import { Settings } from './pages/Settings'
 import { WaitingDeals } from './pages/WaitingDeals'
 import { AddProduct } from './pages/AddProduct'
+import { UploadBar } from './components/Clips'
 
 function Gate() {
   const { session, loading, notice, clearNotice } = useAuth()
@@ -24,6 +25,7 @@ function Gate() {
       <Route path="/add" element={<AddProduct />} />
       <Route path="*" element={<Home />} />
     </Routes>
+    <UploadBar />
     </>
   )
 }

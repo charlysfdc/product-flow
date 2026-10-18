@@ -3,6 +3,11 @@
 //   { action: 'save_token', refresh_token }                after "Connect Google Drive" in Settings
 //   { action: 'create_folder', product_id }                Content Library/Products/<name> with raw + finished
 //   { action: 'upload', product_id, kind, filename, mime, data(base64), width, height }
+//   { action: 'start_upload', product_id, filename, mime, size, origin }   opens a resumable session in <product>/raw
+//   { action: 'upload_status', upload_url, size }                          how many bytes Drive has (for resuming)
+//   { action: 'finish_upload', product_id, drive_file_id, ... }            checks the file in Drive, records the clip
+//   { action: 'sync', product_id }                                         records files found in raw/ and finished/
+// The phone uploads clip bytes straight to Drive with the session URL; it never sees the token.
 // The refresh token lives in the google_drive table (service role only).
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.118.0'
 import { HttpError, serve } from '../_shared/http.ts'
@@ -124,6 +129,80 @@ async function productsFolder(db: SupabaseClient, token: string, row: DriveRow):
   return found.products
 }
 
+/** The product's folder (made under Products when it has none yet) and its raw subfolder. */
+async function productFolders(db: SupabaseClient, token: string, row: DriveRow, p: { id: string; name: string; drive_folder_id: string | null }) {
+  let folderId = p.drive_folder_id
+  if (!folderId) {
+    const parent = await productsFolder(db, token, row)
+    const name = folderName(p.name)
+    folderId = (await ensureFolder(token, name, parent)).id
+    await ensureFolder(token, 'finished', folderId)
+    await db.from('products').update({ drive_folder_id: folderId, drive_folder_name: name }).eq('id', p.id)
+  }
+  const raw = await ensureFolder(token, 'raw', folderId)
+  return { folderId, rawId: raw.id }
+}
+
+async function loadProduct(db: SupabaseClient, id: unknown) {
+  const { data: p, error } = await db.from('products').select('id,name,status,received_at,drive_folder_id').eq('id', String(id ?? '')).maybeSingle()
+  if (error || !p) throw new HttpError(404, 'That product was not found.')
+  return p as { id: string; name: string; status: string; received_at: string | null; drive_folder_id: string | null }
+}
+
+// Browser origins allowed to PUT clip bytes to an upload session (Google answers CORS for this origin only).
+const ORIGINS = ['https://charlysfdc.github.io', 'http://localhost:5173', 'http://127.0.0.1:5173']
+
+const UPLOAD_PREFIX = 'https://www.googleapis.com/upload/drive/v3/files'
+const FILE_FIELDS = 'id,name,size,mimeType,parents,trashed,createdTime,videoMediaMetadata'
+
+interface DriveMediaFile extends DriveFile {
+  size?: string
+  createdTime?: string
+  videoMediaMetadata?: { width?: number; height?: number; durationMillis?: string }
+}
+
+/** First clip in: Not filmed (or On its way) becomes Filmed, not edited. Never moves a product back. */
+async function markFilmed(db: SupabaseClient, p: { id: string; status: string; received_at: string | null }): Promise<boolean> {
+  if (p.status !== 'received' && p.status !== 'expected') return false
+  const patch: Record<string, unknown> = { status: 'filmed' }
+  if (!p.received_at) patch.received_at = new Date().toISOString().slice(0, 10)
+  const { data } = await db.from('products').update(patch).eq('id', p.id).in('status', ['received', 'expected']).select('id')
+  return Boolean(data?.length)
+}
+
+/** Insert a media row, or fill the gaps of the one already recorded for this Drive file. */
+async function recordMedia(db: SupabaseClient, row: Record<string, unknown>): Promise<{ id: string; added: boolean }> {
+  const { data: have } = await db.from('media').select('id').eq('drive_file_id', row.drive_file_id as string).maybeSingle()
+  const clean = Object.fromEntries(Object.entries(row).filter(([, v]) => v !== null && v !== undefined))
+  const attempt = async (r: Record<string, unknown>) => have
+    ? await db.from('media').update(r).eq('id', have.id).select('id').single()
+    : await db.from('media').insert(r).select('id').single()
+  let res = await attempt(clean)
+  // migration 0006 (size_bytes, codec) may not be applied yet: save without those columns
+  if (res.error && /size_bytes|codec/.test(res.error.message)) {
+    const { size_bytes: _s, codec: _c, ...rest } = clean
+    res = await attempt(rest)
+  }
+  if (res.error) throw new HttpError(500, res.error.message)
+  return { id: res.data.id as string, added: !have }
+}
+
+async function listFiles(token: string, folderId: string): Promise<DriveMediaFile[]> {
+  const out: DriveMediaFile[] = []
+  let page: string | undefined
+  do {
+    const query = `'${q(folderId)}' in parents and trashed = false and mimeType != '${FOLDER}'`
+    const r = await g<{ files: DriveMediaFile[]; nextPageToken?: string }>(token,
+      `${API}/files?q=${encodeURIComponent(query)}&fields=nextPageToken,files(${FILE_FIELDS})&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true${page ? `&pageToken=${page}` : ''}`)
+    out.push(...r.files)
+    page = r.nextPageToken
+  } while (page)
+  return out
+}
+
+const isVideo = (f: DriveMediaFile) => (f.mimeType ?? '').startsWith('video/') || /\.(mov|mp4|m4v|hevc)$/i.test(f.name)
+const num = (v: unknown) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v))
+
 const folderName = (name: string) => name.replace(/[/\\]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 120)
 
 serve(async (body, { user, db }) => {
@@ -197,6 +276,116 @@ serve(async (body, { user, db }) => {
       }).select('id').single()
       if (ins.error) throw new HttpError(500, ins.error.message)
       return { media_id: ins.data.id, drive_file_id: file.id }
+    }
+
+    case 'start_upload': {
+      const p = await loadProduct(db, body.product_id)
+      const size = Number(body.size)
+      if (!Number.isFinite(size) || size <= 0) throw new HttpError(400, 'The file is empty.')
+      const origin = String(body.origin ?? '')
+      if (!ORIGINS.includes(origin)) throw new HttpError(400, `Uploads are only allowed from the app (${origin || 'no origin'}).`)
+      const filename = String(body.filename ?? 'clip.mov').replace(/[/\\]+/g, '-').slice(0, 200)
+      const mime = String(body.mime || 'video/quicktime')
+      const row = await loadRow(db)
+      const token = await accessToken(row.refresh_token)
+      const { folderId, rawId } = await productFolders(db, token, row, p)
+      const res = await fetch(`${UPLOAD_PREFIX}?uploadType=resumable&supportsAllDrives=true&fields=${FILE_FIELDS}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json; charset=UTF-8',
+          'X-Upload-Content-Type': mime,
+          'X-Upload-Content-Length': String(size),
+          // Google sends CORS headers for this origin on the session URL, so the phone can PUT to it.
+          Origin: origin,
+        },
+        body: JSON.stringify({ name: filename, parents: [rawId] }),
+      })
+      const url = res.headers.get('Location')
+      if (!res.ok || !url) {
+        const j = await res.json().catch(() => ({}))
+        throw new HttpError(502, `Google Drive would not start the upload: ${j?.error?.message ?? res.status}`)
+      }
+      return { upload_url: url, folder_id: folderId, raw_folder_id: rawId }
+    }
+
+    case 'upload_status': {
+      // Asked when the phone cannot read the Range header itself: how much of the file Drive already has.
+      const url = String(body.upload_url ?? '')
+      if (!url.startsWith(UPLOAD_PREFIX)) throw new HttpError(400, 'Not a Drive upload session.')
+      const size = Number(body.size)
+      const res = await fetch(url, { method: 'PUT', redirect: 'manual', headers: { 'Content-Range': `bytes */${size}`, 'Content-Length': '0' } })
+      if (res.status === 308) {
+        const range = res.headers.get('Range')
+        await res.body?.cancel()
+        return { received: range ? Number(range.split('-')[1]) + 1 : 0 }
+      }
+      if (res.ok) return { received: size, file: await res.json() }
+      await res.body?.cancel()
+      if (res.status === 404 || res.status === 410) return { expired: true }
+      throw new HttpError(502, `Google Drive upload status: ${res.status}`)
+    }
+
+    case 'finish_upload': {
+      const p = await loadProduct(db, body.product_id)
+      const fileId = String(body.drive_file_id ?? '')
+      const row = await loadRow(db)
+      const token = await accessToken(row.refresh_token)
+      const f = await g<DriveMediaFile>(token, `${API}/files/${encodeURIComponent(fileId)}?fields=${FILE_FIELDS}&supportsAllDrives=true`)
+      const expected = num(body.size)
+      if (expected !== null && Number(f.size) !== expected) {
+        throw new HttpError(409, `Drive has ${Number(f.size).toLocaleString()} bytes of ${f.name} but the phone sent ${expected.toLocaleString()}. Upload it again.`)
+      }
+      const media = await recordMedia(db, {
+        product_id: p.id, kind: 'raw_clip', drive_file_id: f.id, filename: f.name,
+        duration_s: num(body.duration_s), width: num(body.width), height: num(body.height),
+        shot_on: body.shot_on ? String(body.shot_on).slice(0, 60) : null, codec: body.codec ? String(body.codec).slice(0, 20) : null,
+        size_bytes: num(f.size), uploaded_by: user.id,
+      })
+      const filmed = await markFilmed(db, p)
+      return { media_id: media.id, size: Number(f.size), status_changed: filmed }
+    }
+
+    case 'sync': {
+      // Fallback for clips dropped into raw/ (or finished/) with the Google Drive app or the Mac.
+      const p = await loadProduct(db, body.product_id)
+      if (!p.drive_folder_id) return { added: 0, raw: 0, finished: 0, status_changed: false, note: 'No Drive folder yet.' }
+      const row = await loadRow(db)
+      const token = await accessToken(row.refresh_token)
+      const rawId = await findFolder(token, 'raw', p.drive_folder_id)
+      const finishedId = await findFolder(token, 'finished', p.drive_folder_id)
+      const raw = rawId ? (await listFiles(token, rawId)).filter(isVideo) : []
+      const finished = finishedId ? (await listFiles(token, finishedId)).filter(isVideo) : []
+      const { data: known } = await db.from('media').select('drive_file_id,duration_s,width,height').eq('product_id', p.id).not('drive_file_id', 'is', null)
+      const have = new Map((known ?? []).map((m) => [m.drive_file_id as string, m]))
+      let added = 0
+      const meta = (f: DriveMediaFile) => {
+        const v = f.videoMediaMetadata
+        return { width: num(v?.width), height: num(v?.height), duration_s: v?.durationMillis ? Math.round(Number(v.durationMillis) / 100) / 10 : null }
+      }
+      const groups = [
+        { files: raw, kind: () => 'raw_clip' },
+        // finished: landscape by Drive's video size, else vertical (most of these are)
+        { files: finished, kind: (f: DriveMediaFile) => { const { width, height } = meta(f); return width && height && width > height ? 'finished_horizontal' : 'finished_vertical' } },
+      ]
+      for (const { files, kind } of groups) {
+        for (const f of files) {
+          const m = meta(f)
+          const old = have.get(f.id)
+          if (old) {
+            // fill duration/size Drive worked out after the upload; never overwrite what the phone measured
+            if (old.duration_s == null && m.duration_s != null) await recordMedia(db, { drive_file_id: f.id, product_id: p.id, ...m, size_bytes: num(f.size) })
+            continue
+          }
+          await recordMedia(db, {
+            product_id: p.id, kind: kind(f), drive_file_id: f.id, filename: f.name, ...m,
+            size_bytes: num(f.size), uploaded_at: f.createdTime ?? undefined,
+          })
+          added++
+        }
+      }
+      const filmed = raw.length > 0 ? await markFilmed(db, p) : false
+      return { added, raw: raw.length, finished: finished.length, status_changed: filmed }
     }
 
     case 'list_folders': {

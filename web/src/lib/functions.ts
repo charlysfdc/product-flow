@@ -57,6 +57,11 @@ export const uploadPhoto = (productId: string, photo: { base64: string; width: n
     data: photo.base64, width: photo.width, height: photo.height,
   })
 
+export interface SyncResult { added: number; raw: number; finished: number; status_changed: boolean; note?: string }
+
+/** Records clips found in the product's raw/ and finished/ folders that the app doesn't know yet. */
+export const syncFromDrive = (productId: string) => callFunction<SyncResult>('drive', { action: 'sync', product_id: productId })
+
 export interface FolderListing { folder: { id: string; name: string; parent: string | null }; folders: { id: string; name: string }[] }
 
 /** Subfolders of a Drive folder ('root' = My Drive), for picking the Products folder by hand. */

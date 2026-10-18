@@ -290,3 +290,31 @@ main.has-bar { padding-bottom: 0; }
 .spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.25); border-top-color: #fff; animation: spin 0.8s linear infinite; position: relative; z-index: 2; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+
+/* ---- Film: uploads and clips ---- */
+.up { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.up-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 17px; }
+.up-head span { font-variant-numeric: tabular-nums; font-weight: 700; }
+.up-head .link { padding: 0; }
+.bar { height: 8px; border-radius: 99px; background: var(--chip); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width 0.3s; }
+.bar-sm { height: 4px; margin: 6px 0 2px; }
+.up-note { margin: 0; font-size: 14px; color: var(--muted); }
+.up-list { list-style: none; margin: 0; padding: 0; }
+.up-list li { padding: 10px 0; border-top: 1px solid var(--line); }
+.up-row { display: flex; justify-content: space-between; gap: 10px; }
+.up-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.up-meta, .up-state { color: var(--muted); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.up-state { display: flex; justify-content: space-between; gap: 10px; white-space: normal; }
+.up-state .link { padding: 0; font-size: 14px; }
+.up-done .up-state { color: var(--done); }
+.up-failed .up-state { color: var(--hot); }
+.up-retrying .up-state { color: var(--accent); }
+.tip { margin: 6px 4px 0; font-size: 13px; color: var(--muted); }
+.next .tip { margin: -4px 0 0; color: var(--primary-muted); }
+.clip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.sync-note { margin: 6px 4px 0; font-size: 14px; color: var(--muted); }
+.upbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(92px + env(safe-area-inset-bottom)); width: calc(100% - 28px); max-width: 612px; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--primary); color: var(--primary-text); border-radius: 18px; padding: 12px 16px; z-index: 25; box-shadow: 0 12px 24px -12px rgba(19, 21, 37, 0.6); }
+.upbar b { display: block; font-size: 15px; }
+.upbar small { color: var(--primary-muted); font-size: 13px; }
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }

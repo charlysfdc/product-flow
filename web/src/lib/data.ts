@@ -104,7 +104,7 @@ export function useProduct(id: string | undefined) {
         supabase.from('posts').select('*').eq('product_id', id).order('posted_at', { ascending: false }),
         supabase.from('jobs').select('*').eq('product_id', id).order('created_at', { ascending: false }),
         supabase.from('deals').select('*').eq('product_id', id).order('deal_created_at', { ascending: false }),
-        supabase.from('media').select('id,product_id,kind,drive_file_id,filename,width,height,uploaded_at').eq('product_id', id).order('uploaded_at', { ascending: false }),
+        supabase.from('media').select('*').eq('product_id', id).order('filename'),
       ])
       if (cancelled) return
       const err = p.error ?? l.error ?? po.error ?? j.error

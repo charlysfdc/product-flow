@@ -163,6 +163,42 @@ function anthropic(): Anthropic | null {
 }
 
 /**
+ * One Claude request that survives an option the API turns down: on a 400 it
+ * drops the newest option first (server-side fallback, then the JSON format)
+ * and tries again. The answer is asked for as JSON in the prompt as well, so the
+ * plain request still parses.
+ */
+// deno-lint-ignore no-explicit-any
+async function createRobust(client: Anthropic, params: any): Promise<any> {
+  const { betas: _b, fallbacks: _f, ...plain } = params
+  const { format: _fmt, ...outputConfig } = plain.output_config ?? {}
+  const attempts = [
+    () => client.beta.messages.create(params),
+    () => client.messages.create(plain),
+    () => client.messages.create({ ...plain, output_config: outputConfig }),
+  ]
+  let last: unknown
+  for (const attempt of attempts) {
+    try {
+      return await attempt()
+    } catch (e) {
+      last = e
+      if (!(e instanceof Anthropic.BadRequestError)) throw e
+      console.error('Claude 400, trying a simpler request:', (e as Error).message)
+    }
+  }
+  throw last
+}
+
+/** Claude's own words from an API error, short enough for the phone. */
+function apiMessage(e: unknown): string {
+  // deno-lint-ignore no-explicit-any
+  const err = e as any
+  const msg = err?.error?.error?.message ?? err?.message ?? String(e)
+  return String(msg).replace(/^\d{3}\s*/, '').slice(0, 220)
+}
+
+/**
  * Last resort when Amazon and the reader proxy are both blocked: Claude with
  * web search answers a narrow question (an ASIN's title, a barcode's product).
  */
@@ -186,7 +222,7 @@ async function webLookup(question: string): Promise<{ title: string | null; bran
         tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
         messages,
       }
-      res = await client.beta.messages.create(params)
+      res = await createRobust(client, params)
       if (res.stop_reason !== 'pause_turn') break
       messages.push({ role: 'assistant', content: res.content })   // resume the paused server-side search
     }
@@ -418,17 +454,17 @@ async function byPhoto(image: string, mediaType: string): Promise<Identification
       role: 'user',
       content: [
         { type: 'image', source: { type: 'base64', media_type: mediaType === 'image/png' ? 'image/png' : 'image/jpeg', data: image } },
-        { type: 'text', text: 'What product is this? Fill in every field.' },
+        { type: 'text', text: 'What product is this? Reply with one JSON object with the keys brand, product, variant, name, upc, confidence (high, medium or low) and note; use "" for anything not visible.' },
       ],
     }],
   }
   let res
   try {
-    res = await client.beta.messages.create(params)
+    res = await createRobust(client, params)
   } catch (e) {
     if (e instanceof Anthropic.AuthenticationError) throw new HttpError(500, 'The Anthropic API key in the Supabase secrets was rejected.')
     if (e instanceof Anthropic.RateLimitError) throw new HttpError(429, 'Claude is busy right now; try again in a minute.')
-    if (e instanceof Anthropic.APIError) throw new HttpError(502, `Claude could not read the photo (${e.status ?? 'error'}).`)
+    if (e instanceof Anthropic.APIError) throw new HttpError(502, `Claude could not read the photo (${e.status ?? 'error'}: ${apiMessage(e)}).`)
     throw e
   }
   if (res.stop_reason === 'refusal') throw new HttpError(422, 'Claude declined to read this photo. Type the name instead.')
@@ -436,7 +472,7 @@ async function byPhoto(image: string, mediaType: string): Promise<Identification
   const text = (res.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('')
   let got: Record<string, string>
   try {
-    got = JSON.parse(text)
+    got = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text)
   } catch {
     throw new HttpError(502, 'Claude’s answer could not be read. Try the photo again.')
   }

@@ -8,7 +8,8 @@ import {
   STATUS_HELP, STATUS_LABEL, STATUS_ORDER, driveFolderUrl,
   type Platform, type Post, type Product, type ProductSource, type ProductStatus,
 } from '../lib/types'
-import { deadlineText } from '../components/ProductRow'
+import { Thumb, deadlineText } from '../components/ProductRow'
+import { makeDriveFolder } from '../lib/functions'
 import { Options, Sheet } from '../components/Sheet'
 import { DealCard } from '../components/DealCard'
 import { unlinkDeal } from '../lib/deals'
@@ -18,6 +19,7 @@ function fmtDate(d: string | null) {
   if (!d) return null
   return new Date(d + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 }
+const fmtShort = (d: string | null) => (d ? new Date(d.length === 10 ? d + 'T00:00:00' : d).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : null)
 const today = () => new Date().toISOString().slice(0, 10)
 
 type SheetKind =
@@ -66,7 +68,7 @@ export function ProductPage() {
   if (error) return <main><Link to="/" className="back">‹ Home</Link><p className="error">{error}</p></main>
   if (!detail) return <main><Link to="/" className="back">‹ Home</Link><p className="muted">Loading…</p></main>
 
-  const { product: p, listings, posts, jobs, deals } = detail
+  const { product: p, listings, posts, jobs, deals, media } = detail
   const due = deadlineText(p.deadline)
   const totalViews = posts.reduce((n, po) => n + (po.views ?? 0), 0)
   const folderUrl = driveFolderUrl(p)
@@ -74,7 +76,9 @@ export function ProductPage() {
 
   const setStatus = (status: ProductStatus) =>
     run('Changing status', async () => {
-      const { error } = await supabase.from('products').update({ status }).eq('id', p.id)
+      const patch: Partial<Product> = { status }
+      if (status === 'received' && !p.received_at) patch.received_at = today()
+      const { error } = await supabase.from('products').update(patch).eq('id', p.id)
       if (error) throw error
       close()
     })
@@ -121,75 +125,138 @@ export function ProductPage() {
       navigate(`/product/${target.id}`, { replace: true })
     })
 
+  const makeFolder = () =>
+    run('Making the Drive folder', async () => {
+      await makeDriveFolder(p.id)
+    })
+
+  const statusAt = STATUS_ORDER.indexOf(p.status)
+  const reached = (s: ProductStatus) => statusAt >= STATUS_ORDER.indexOf(s)
+  const unposted = checklist.filter((c) => !c.posted)
+  const plannedAmazon = unposted.some((c) => c.platform.startsWith('amazon'))
+  const messaged = deals.find((d) => d.message_sent_at)
+  const intake = media.filter((m) => m.kind === 'intake_photo')
+
+  // One next step, from the status. Each has one main button and one smaller action.
+  const folderLink = (label: string) => folderUrl
+    ? <a className="pri" href={folderUrl} target="_blank" rel="noreferrer">{label} ↗</a>
+    : <button className="pri" disabled={busy} onClick={makeFolder}>{busy ? 'Making the folder…' : 'Make the Drive folder'}</button>
+  const next: { eyebrow: string; title: string; body: string; main: React.ReactNode; subLabel?: string; sub?: React.ReactNode } = (() => {
+    const deadline = due ? ` ${p.source === 'tiktok_sample' ? 'TikTok Shop deadline' : 'Deadline'}: ${due.toLowerCase()}.` : ''
+    switch (p.status) {
+      case 'expected':
+        return { eyebrow: 'Next step', title: 'Wait for it to arrive', body: `Tap when the box is here.${deadline}`,
+          main: <button className="pri" disabled={busy} onClick={() => setStatus('received')}>It arrived</button> }
+      case 'received':
+        return { eyebrow: 'Next step', title: 'Film it', body: `${folderUrl ? 'Clips go in the raw folder in Drive.' : 'There is no Drive folder for it yet.'}${deadline}`,
+          main: folderLink('Open the Drive folder'), subLabel: 'Filmed it?', sub: <button disabled={busy} onClick={() => setStatus('filmed')}>Mark as filmed ›</button> }
+      case 'filmed':
+      case 'editing':
+        return { eyebrow: p.status === 'editing' ? 'Being edited' : 'Next step', title: plannedAmazon ? 'Edit it and upload to Amazon' : 'Edit it',
+          body: `Raw clips are in Drive.${deadline}`, main: folderLink('Open raw clips'),
+          subLabel: 'Already edited?', sub: <button disabled={busy} onClick={() => setStatus('ready')}>Mark as edited ›</button> }
+      case 'ready':
+        return unposted.length
+          ? { eyebrow: 'Next step', title: `Post it on ${unposted.map((c) => PLATFORM_LABEL[c.platform]).join(', ')}`, body: `The finished video is in Drive.${deadline}`,
+              main: <button className="pri" onClick={() => setSheet({ kind: 'post', platform: unposted[0].platform })}>Mark {PLATFORM_LABEL[unposted[0].platform]} as posted</button>,
+              subLabel: 'Finished video', sub: folderUrl ? <a href={folderUrl} target="_blank" rel="noreferrer" style={{ color: 'inherit', fontWeight: 700 }}>Open in Drive ↗</a> : undefined }
+          : { eyebrow: 'Next step', title: 'Pick where to post it', body: 'No platform is planned yet.',
+              main: <button className="pri" onClick={() => setSheet({ kind: 'addPlatform' })}>Add a platform</button> }
+      case 'done':
+        return { eyebrow: 'All done', title: 'Posted everywhere', body: totalViews > 0 ? `${totalViews.toLocaleString()} Amazon views so far.` : 'Every planned platform has a post.',
+          main: <button className="pri" onClick={() => setSheet({ kind: 'addPlatform' })}>Post somewhere else too</button> }
+    }
+  })()
+
+  type Step = { key: string; label: string; detail?: string | null; when?: string | null; ok: boolean; onTap?: () => void }
+  const steps: Step[] = [
+    ...(messaged ? [{ key: 'msg', label: `Messaged ${messaged.brand ?? 'the brand'}`, detail: 'through ViralVue', when: fmtShort(messaged.message_sent_at), ok: true }] : []),
+    { key: 'arrived', label: p.status === 'expected' ? 'Arrives' : 'Arrived', detail: SOURCE_LABEL[p.source] === SOURCE_LABEL.unknown ? null : SOURCE_LABEL[p.source], when: fmtShort(p.received_at), ok: reached('received'), onTap: () => setSheet({ kind: 'status' }) },
+    { key: 'filmed', label: 'Filmed', detail: reached('filmed') ? null : 'Clips go in /raw', ok: reached('filmed'), onTap: () => setSheet({ kind: 'status' }) },
+    { key: 'edited', label: 'Edited', detail: reached('ready') ? null : 'Finished video goes in /finished', ok: reached('ready'), onTap: () => setSheet({ kind: 'status' }) },
+    ...checklist.map((c) => {
+      const done = c.posts.filter((po) => po.status === 'posted')
+      const views = done.reduce((n, po) => n + (po.views ?? 0), 0)
+      return {
+        key: c.platform, label: `Posted on ${PLATFORM_LABEL[c.platform]}`, ok: c.posted,
+        detail: c.posted ? (views ? `${views.toLocaleString()} views` : null) : 'Not posted yet',
+        when: c.posted ? fmtShort(done[0]?.posted_at ?? null) : null,
+        onTap: () => setSheet({ kind: 'post', platform: c.platform }),
+      }
+    }),
+  ]
+  const nowIndex = steps.findIndex((s) => !s.ok)
+
   return (
     <main>
-      <Link to="/" className="back">‹ Home</Link>
-      <header className="product-head">
-        {p.product_image_url && <img src={p.product_image_url} alt="" className="product-img" />}
-        <h1>{p.name}</h1>
-        <div className="chips">
-          <button className={`chip chip-btn status-${p.status}`} onClick={() => setSheet({ kind: 'status' })}>
-            {STATUS_LABEL[p.status]} ▾
-          </button>
-          <button className={'chip chip-btn' + (p.source === 'unknown' ? ' chip-ask' : '')} onClick={() => setSheet({ kind: 'source' })}>
-            {SOURCE_LABEL[p.source]} ▾
-          </button>
-          {due && <span className="chip chip-due">{due}</span>}
+      <div className="pn">
+        <Link to="/" className="bk" aria-label="Home">‹</Link>
+        <Thumb src={p.product_image_url} name={p.name} />
+        <div style={{ minWidth: 0 }}>
+          <h1>{p.name}</h1>
+          <small>{[p.brand, p.variant].filter(Boolean).join(' · ') || STATUS_LABEL[p.status]}</small>
         </div>
-        <dl className="facts">
-          {p.brand && <><dt>Brand</dt><dd>{p.brand}</dd></>}
-          {p.variant && <><dt>Variant</dt><dd>{p.variant}</dd></>}
-          {p.upc && <><dt>Barcode</dt><dd>{p.upc}</dd></>}
-          {p.received_at && <><dt>Received</dt><dd>{fmtDate(p.received_at)}</dd></>}
-          {p.deadline && <><dt>Deadline</dt><dd>{fmtDate(p.deadline)}</dd></>}
-          <dt>Drive folder</dt>
-          <dd>
-            {folderUrl ? <a href={folderUrl} target="_blank" rel="noreferrer">{p.drive_folder_name ?? 'Open in Drive'} ↗</a> : <span className="muted">No Drive folder yet</span>}
-            {(p.extra_drive_folders ?? []).map((f, i) => (
-              <div key={i}><a href={driveFolderUrl(f) ?? '#'} target="_blank" rel="noreferrer">{f.name ?? 'Second folder'} ↗</a> <span className="muted small">(also)</span></div>
-            ))}
-          </dd>
-        </dl>
-      </header>
+      </div>
 
       {actionError && <p className="error">{actionError}</p>}
 
-      <section>
-        <h2>Where it's posted <span className="count">{checklist.filter((c) => c.posted).length}/{checklist.length}</span></h2>
-        {checklist.length === 0 ? (
-          <p className="empty">No platform planned yet. Add one below.</p>
-        ) : (
-          <ul className="list">
-            {checklist.map((c) => (
-              <li key={c.platform}>
-                <button className="row row-btn" onClick={() => setSheet({ kind: 'post', platform: c.platform })}>
-                  <span className={'box' + (c.posted ? ' box-on' : '')} aria-hidden>{c.posted ? '✓' : ''}</span>
-                  <span className="row-main">
-                    <span className="row-title">{PLATFORM_LABEL[c.platform]}</span>
-                    <span className="row-sub">
-                      {c.posted
-                        ? c.posts.filter((po) => po.status === 'posted').map((po) =>
-                            [fmtDate(po.posted_at), po.views != null ? `${po.views.toLocaleString()} views` : null].filter(Boolean).join(' · ') || 'posted',
-                          ).join(' / ')
-                        : 'Not posted yet'}
-                    </span>
-                  </span>
-                  <span className="chev" aria-hidden>›</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+      <section className="next">
+        <span className="eyebrow">{next.eyebrow}</span>
+        <h2>{next.title}</h2>
+        <p>{next.body}</p>
+        {next.main}
+        {(next.subLabel || next.sub) && <div className="sub"><span>{next.subLabel}</span>{next.sub}</div>}
+      </section>
+
+      <div className="chips">
+        <button className={`chip chip-btn status-${p.status}`} onClick={() => setSheet({ kind: 'status' })}>{STATUS_LABEL[p.status]} ▾</button>
+        <button className={'chip chip-btn' + (p.source === 'unknown' ? ' chip-ask' : '')} onClick={() => setSheet({ kind: 'source' })}>{SOURCE_LABEL[p.source]} ▾</button>
+        {due && <span className="chip chip-due">{due}</span>}
+        {folderUrl
+          ? <a className="chip" href={folderUrl} target="_blank" rel="noreferrer">{p.drive_folder_name ?? 'Drive folder'} ↗</a>
+          : <button className="chip chip-btn" disabled={busy} onClick={makeFolder}>Make Drive folder</button>}
+        {(p.extra_drive_folders ?? []).map((f, i) => (
+          <a key={i} className="chip" href={driveFolderUrl(f) ?? '#'} target="_blank" rel="noreferrer">{f.name ?? 'Second folder'} ↗</a>
+        ))}
+      </div>
+
+      <section className="tl">
+        <h2>So far <span className="count">{checklist.filter((c) => c.posted).length}/{checklist.length} posted</span></h2>
+        {steps.map((s, i) => (
+          <button key={s.key} className="st" onClick={s.onTap}>
+            <span className={'dot' + (s.ok ? ' dot-ok' : i === nowIndex ? ' dot-now' : '')} aria-hidden>{s.ok ? '✓' : ''}</span>
+            <span><b>{s.label}</b>{s.detail && <small>{s.detail}</small>}</span>
+            <span className="w">{s.when ?? ''}</span>
+          </button>
+        ))}
         <div className="actions">
           <button className="secondary" onClick={() => setSheet({ kind: 'addPlatform' })}>Add a platform</button>
-          {p.status !== 'done' && (
+          {p.status !== 'done' && checklist.length > 0 && (
             <button className="secondary" onClick={() => setStatus('done')} disabled={busy}>
-              {allPosted ? 'Mark as posted' : 'Mark as posted everywhere'}
+              {allPosted ? 'Mark as done' : 'Posted everywhere'}
             </button>
           )}
         </div>
-        {totalViews > 0 && <p className="muted small">{totalViews.toLocaleString()} Amazon views in total</p>}
       </section>
+
+      {(p.product_image_url || intake.length > 0) && (
+        <section>
+          <h2>Photos</h2>
+          {p.product_image_url && <img src={p.product_image_url} alt="" className="product-img" />}
+          {intake.length > 0 && (
+            <ul className="list">
+              {intake.map((m) => (
+                <li key={m.id}>
+                  <a className="row" href={m.drive_file_id ? `https://drive.google.com/file/d/${m.drive_file_id}/view` : '#'} target="_blank" rel="noreferrer">
+                    <span className="row-main"><span className="row-title">Photo of the box</span><span className="row-sub">{fmtDate(m.uploaded_at.slice(0, 10))} · in Drive</span></span>
+                    <span className="chev" aria-hidden>↗</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {deals.length > 0 && (
         <section>
@@ -205,6 +272,20 @@ export function ProductPage() {
           </ul>
         </section>
       )}
+
+      <section>
+        <h2>Details</h2>
+        <div className="card">
+          <dl className="facts">
+            {p.brand && <><dt>Brand</dt><dd>{p.brand}</dd></>}
+            {p.variant && <><dt>Variant</dt><dd>{p.variant}</dd></>}
+            {p.upc && <><dt>Barcode</dt><dd>{p.upc}</dd></>}
+            {p.received_at && <><dt>Received</dt><dd>{fmtDate(p.received_at)}</dd></>}
+            {p.deadline && <><dt>Deadline</dt><dd>{fmtDate(p.deadline)}</dd></>}
+            <dt>Status</dt><dd>{STATUS_HELP[p.status]}</dd>
+          </dl>
+        </div>
+      </section>
 
       <section>
         <h2>Listings <span className="count">{listings.length}</span></h2>
@@ -258,7 +339,7 @@ export function ProductPage() {
         <div className="actions">
           <button className="secondary" onClick={() => setSheet({ kind: 'merge' })}>Merge into…</button>
         </div>
-        <p className="muted small">Use Merge when the same product exists twice: everything moves to the one you pick and this copy is removed.</p>
+        <p className="muted small" style={{ margin: '0 4px' }}>Use Merge when the same product exists twice: everything moves to the one you pick and this copy is removed.</p>
       </section>
 
       {sheet?.kind === 'status' && (

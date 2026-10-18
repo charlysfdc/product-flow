@@ -47,6 +47,17 @@ export interface Post {
   views: number | null
 }
 
+export interface Media {
+  id: string
+  product_id: string
+  kind: 'intake_photo' | 'raw_clip' | 'finished_horizontal' | 'finished_vertical' | 'thumbnail'
+  drive_file_id: string | null
+  filename: string
+  width: number | null
+  height: number | null
+  uploaded_at: string
+}
+
 export interface Job {
   id: string
   product_id: string | null

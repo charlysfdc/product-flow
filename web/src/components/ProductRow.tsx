@@ -19,12 +19,20 @@ export function deadlineText(date: string | null): string | null {
   return `Due in ${n} days`
 }
 
+/** Product photo, or its initials on a tinted tile when there is none. */
+export function Thumb({ src, name, className = 'thumb' }: { src: string | null | undefined; name: string; className?: string }) {
+  if (src) return <img src={src} alt="" className={className} loading="lazy" />
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('')
+  return <span className={className === 'thumb' ? 'thumb-ph' : `thumb-ph ${className}`} aria-hidden>{initials}</span>
+}
+
 export function ProductRow({ product, detail, showStatus }: { product: Product; detail?: string | null; showStatus?: boolean }) {
   const due = deadlineText(product.deadline)
   const n = daysUntil(product.deadline)
   return (
     <li>
       <Link to={`/product/${product.id}`} className="row">
+        <Thumb src={product.product_image_url} name={product.name} />
         <div className="row-main">
           <div className="row-title">{product.name}</div>
           <div className="row-sub">

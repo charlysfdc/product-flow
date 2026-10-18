@@ -18,13 +18,14 @@ function writeState(id: string, open: boolean) {
 }
 
 /**
- * A Home section with a compact tappable header showing the count. Open/closed
- * is remembered per device. Long lists can show a preview of `preview` rows
- * with a "Show all N" link instead of collapsing.
+ * A Home row in the "After that" list: a big count, a verb and a one-line hint;
+ * tapping opens the products underneath. Open/closed is remembered per device.
+ * Long lists show a preview of `preview` rows with a "Show all N" link.
  */
-export function Section({ id, title, count, defaultOpen = true, preview, children, empty }: {
+export function Section({ id, title, sub, count, defaultOpen = false, preview, children, empty }: {
   id: string
   title: string
+  sub?: string | null
   count: number
   defaultOpen?: boolean
   preview?: number
@@ -41,9 +42,9 @@ export function Section({ id, title, count, defaultOpen = true, preview, childre
   return (
     <section className="sec">
       <button className="sec-head" onClick={toggle} aria-expanded={open}>
+        <span className="sec-big">{count.toLocaleString()}</span>
+        <span className="sec-title">{title}{sub && <span className="sec-sub">{sub}</span>}</span>
         <span className={'disc' + (open ? ' disc-open' : '')} aria-hidden>›</span>
-        <span className="sec-title">{title}</span>
-        <span className="count">{count}</span>
       </button>
       {open && (count === 0 && empty ? <p className="empty">{empty}</p> : (
         <>

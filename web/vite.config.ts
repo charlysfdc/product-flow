@@ -14,8 +14,8 @@ export default defineConfig({
         name: 'Product Flow',
         short_name: 'Product Flow',
         description: 'Products from the box to posted',
-        theme_color: '#1f6f5f',
-        background_color: '#ffffff',
+        theme_color: '#f1f2f7',
+        background_color: '#f1f2f7',
         display: 'standalone',
         start_url: '.',
         scope: '.',
@@ -26,7 +26,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,wasm}'],
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         // never cache Supabase calls; the lists must be live
         runtimeCaching: [],
       },

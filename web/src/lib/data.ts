@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from './supabase'
-import { ACTIVE_DEAL_STATUSES, quietCutoffIso, type Deal, type Job, type Listing, type Post, type Product } from './types'
+import { ACTIVE_DEAL_STATUSES, quietCutoffIso, type Deal, type Job, type Listing, type Media, type Post, type Product } from './types'
 
 export interface Snapshot {
   products: Product[]
@@ -85,6 +85,7 @@ export interface ProductDetail {
   posts: Post[]
   jobs: Job[]
   deals: Deal[]
+  media: Media[]
 }
 
 export function useProduct(id: string | undefined) {
@@ -97,12 +98,13 @@ export function useProduct(id: string | undefined) {
     if (!id) return
     let cancelled = false
     ;(async () => {
-      const [p, l, po, j, d] = await Promise.all([
+      const [p, l, po, j, d, m] = await Promise.all([
         supabase.from('products').select('*').eq('id', id).single(),
         supabase.from('listings').select('*').eq('product_id', id).order('platform'),
         supabase.from('posts').select('*').eq('product_id', id).order('posted_at', { ascending: false }),
         supabase.from('jobs').select('*').eq('product_id', id).order('created_at', { ascending: false }),
         supabase.from('deals').select('*').eq('product_id', id).order('deal_created_at', { ascending: false }),
+        supabase.from('media').select('id,product_id,kind,drive_file_id,filename,width,height,uploaded_at').eq('product_id', id).order('uploaded_at', { ascending: false }),
       ])
       if (cancelled) return
       const err = p.error ?? l.error ?? po.error ?? j.error
@@ -116,6 +118,7 @@ export function useProduct(id: string | undefined) {
         posts: (po.data ?? []) as Post[],
         jobs: (j.data ?? []) as Job[],
         deals: (d.error ? [] : (d.data ?? [])) as Deal[],
+        media: (m.error ? [] : (m.data ?? [])) as Media[],
       })
     })()
     return () => {

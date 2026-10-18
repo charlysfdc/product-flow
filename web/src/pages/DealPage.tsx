@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { createProductFromDeal, ignoreDeal, linkDealToProduct, receiveDeal, selectAll, substituteDeal, suggestProducts, unlinkDeal } from '../lib/deals'
 import { SOURCE_HELP, SOURCE_LABEL, SOURCE_ORDER, STATUS_LABEL, type Deal, type Product, type ProductSource } from '../lib/types'
@@ -41,6 +41,17 @@ export function DealPage() {
     if (all || !deal || deal.product_id || deal.match_status === 'ignored') return
     selectAll<Product>((a, b) => supabase.from('products').select('*').order('name').range(a, b)).then(setAll)
   }, [all, deal])
+
+  // Home's "Yes, same" opens straight on the confirm step for the suggested product
+  const location = useLocation()
+  const confirmId = (location.state as { confirmId?: string } | null)?.confirmId
+  const [usedConfirmId, setUsedConfirmId] = useState(false)
+  useEffect(() => {
+    if (usedConfirmId || !confirmId || !all || !deal || deal.product_id) return
+    const p = all.find((x) => x.id === confirmId)
+    if (p) setConfirm(p)
+    setUsedConfirmId(true)
+  }, [confirmId, usedConfirmId, all, deal])
 
   const suggestions = useMemo(() => (all && deal ? suggestProducts(deal, all, 3).map((s) => all.find((p) => p.id === s.id)!) : []), [all, deal])
 

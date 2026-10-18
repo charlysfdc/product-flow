@@ -1,10 +1,10 @@
-import { DEAL_STATE_LABEL, dealState, type Deal } from '../lib/types'
+import { DEAL_STATE_LABEL, dealState, type Deal, type ProductSource } from '../lib/types'
 
 const fmt = (ts: string | null) =>
   ts ? new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : null
 
 /** The four ViralVue steps of a brand deal as a checklist, with a warning when a video went live before the brand heard from you. */
-export function DealCard({ deal, children }: { deal: Deal; children?: React.ReactNode }) {
+export function DealCard({ deal, productSource, children }: { deal: Deal; productSource?: ProductSource; children?: React.ReactNode }) {
   const steps: { label: string; at: string | null }[] = [
     { label: 'Message sent to the brand', at: deal.message_sent_at },
     { label: 'Product received', at: deal.received_at },
@@ -37,6 +37,7 @@ export function DealCard({ deal, children }: { deal: Deal; children?: React.Reac
           </li>
         ))}
       </ul>
+      {productSource === 'bought' && <p className="muted small">Brand deal claimed, bought myself.</p>}
       {noMessage && <p className="flag">Published, but no message was sent to the brand. Send one in ViralVue.</p>}
       {children}
     </div>

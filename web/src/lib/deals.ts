@@ -132,7 +132,11 @@ export function suggestProducts(deal: Pick<Deal, 'brand' | 'title'>, products: P
 
 // ---- product side effects -------------------------------------------------
 
-/** Link a deal to a product: fill the product's empty fields, make sure the ASIN listing and (if published) an Amazon post exist. */
+/**
+ * Link a deal to a product: fill the product's empty fields, make sure the ASIN
+ * listing and (if published) an Amazon post exist. The source is set only when
+ * it is still unknown; a product marked Bought (or anything else) keeps it.
+ */
 export async function linkDealToProduct(client: SupabaseClient, deal: Deal, product: Product): Promise<{ postCreated: boolean }> {
   const patch: Partial<Product> = {}
   if (product.source === 'unknown') patch.source = 'amazon_sample'
@@ -185,7 +189,7 @@ function statusFromDeal(d: Pick<Deal, 'received_at' | 'video_created_at' | 'publ
  * ASIN listing, full image, received date), stamp received_at and link the deal.
  * Used by "It arrived", "Create new product", the import's auto-create and, later, Add product.
  */
-export async function receiveDeal(client: SupabaseClient, deal: Deal, overrides: Partial<Pick<Product, 'name' | 'status'>> = {}): Promise<Product> {
+export async function receiveDeal(client: SupabaseClient, deal: Deal, overrides: Partial<Pick<Product, 'name' | 'status' | 'source'>> = {}): Promise<Product> {
   const received = deal.received_at ?? new Date().toISOString()
   if (!deal.received_at) {
     throwIf('stamp received', (await client.from('deals').update({ received_at: received }).eq('id', deal.id)).error)
@@ -195,7 +199,7 @@ export async function receiveDeal(client: SupabaseClient, deal: Deal, overrides:
   const row = {
     name: base,
     brand: deal.brand,
-    source: 'amazon_sample',
+    source: overrides.source ?? 'amazon_sample',   // "I bought it" passes 'bought'; a claimed deal on a bought product is fine
     status: overrides.status ?? statusFromDeal(deal),
     received_at: day(received),
     product_image_url: deal.image_url,

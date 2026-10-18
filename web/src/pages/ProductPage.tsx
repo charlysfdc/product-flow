@@ -186,7 +186,7 @@ export function ProductPage() {
       {deals.length > 0 && (
         <section>
           <h2>Brand deal{deals.length > 1 ? 's' : ''}</h2>
-          <ul className="cards">{deals.map((d) => <li key={d.id}><DealCard deal={d} /></li>)}</ul>
+          <ul className="cards">{deals.map((d) => <li key={d.id}><DealCard deal={d} productSource={p.source} /></li>)}</ul>
         </section>
       )}
 

@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { createProductFromDeal, ignoreDeal, linkDealToProduct, receiveDeal, selectAll, suggestProducts } from '../lib/deals'
 import { STATUS_LABEL, type Deal, type Product } from '../lib/types'
 import { DealCard } from '../components/DealCard'
-import { Sheet } from '../components/Sheet'
+import { Options, Sheet } from '../components/Sheet'
 
 /** A brand deal that matched no product: Charly says which product it is, or creates one. */
 export function DealPage() {
@@ -15,6 +15,7 @@ export function DealPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [picking, setPicking] = useState(false)
+  const [arrived, setArrived] = useState(false)
   const [all, setAll] = useState<Product[] | null>(null)
   const [q, setQ] = useState('')
 
@@ -78,10 +79,7 @@ export function DealPage() {
           <h2>Nothing has arrived yet</h2>
           <p className="muted small">When the box turns up, tap "It arrived": that creates the product with the brand, ASIN and image from the deal.</p>
           <div className="actions">
-            <button className="primary" disabled={busy} onClick={() => run('It arrived', async () => {
-              const p = await receiveDeal(supabase, deal)
-              return `/product/${p.id}`
-            })}>It arrived</button>
+            <button className="primary" disabled={busy} onClick={() => setArrived(true)}>It arrived</button>
             <button className="secondary" onClick={() => setPicking(true)} disabled={busy}>It is a product I already have…</button>
             <button className="link" disabled={busy} onClick={() => run('Ignore', async () => {
               await ignoreDeal(supabase, deal)
@@ -114,12 +112,33 @@ export function DealPage() {
               const p = await createProductFromDeal(supabase, deal)
               return `/product/${p.id}`
             })}>Create new product</button>
+            <button className="secondary" disabled={busy} onClick={() => run('Create product', async () => {
+              const p = await createProductFromDeal(supabase, deal, { source: 'bought' })
+              return `/product/${p.id}`
+            })}>Create new — I bought it</button>
             <button className="link" disabled={busy} onClick={() => run('Ignore', async () => {
               await ignoreDeal(supabase, deal)
               return '/'
             })}>Ignore this deal</button>
           </div>
         </section>
+      )}
+
+      {arrived && (
+        <Sheet title="It arrived: how did you get it?" onClose={() => setArrived(false)}>
+          <p className="muted small">This creates the product with the brand, ASIN and image from the deal.</p>
+          <Options
+            options={[
+              { value: 'amazon_sample' as const, label: 'Free sample', help: 'The brand sent it through the deal.' },
+              { value: 'bought' as const, label: 'I bought it', help: 'Paid for it yourself; the deal stays linked for the record.' },
+            ]}
+            value={null}
+            onPick={(source) => run('It arrived', async () => {
+              const p = await receiveDeal(supabase, deal, { source })
+              return `/product/${p.id}`
+            })}
+          />
+        </Sheet>
       )}
 
       {picking && (

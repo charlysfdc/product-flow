@@ -102,13 +102,18 @@ ViralVue export) or from the Mac with the same code:
 cd web && SUPABASE_URL=https://<ref>.supabase.co SUPABASE_SECRET_KEY='sb_secret_...' npx tsx scripts/import-deals.ts ~/Downloads/amazon-brand-deals.csv
 ```
 
+Preview an export first with `npx tsx scripts/preview-deals.ts <file.csv>` (same env).
+
 Rules (`web/src/lib/deals.ts`): deals are upserted by Deal ID, never duplicated;
 a deal whose ASIN matches a product's Amazon listing is linked and fills only the
 product's empty fields (source, brand, received date, image) and records the
 Amazon post if ViralVue says it was published; a received deal with no match
-shows on Home under "Needs your answer"; a deal where nothing arrived stays a
-deal row only ("Waiting on brand", or "went quiet" after 30 days) and becomes a
-product only when you tap "It arrived".
+shows on Home under "Needs your answer" with a look-alike suggestion when an
+existing product shares the brand or title words, or gets a product created
+automatically when nothing looks alike; declined deals are hidden; a deal where
+nothing arrived stays a deal row only ("Waiting on brand": negotiating,
+in progress, new, or messaged within 30 days; older ones "went quiet" behind a
+toggle) and becomes a product only when you tap "It arrived".
 
 ## Run locally
 

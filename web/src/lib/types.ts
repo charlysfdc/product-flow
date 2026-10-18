@@ -88,6 +88,7 @@ export interface LinkAdded {
   product_before?: Partial<Pick<Product, 'source' | 'brand' | 'received_at' | 'product_image_url'>>
   created_product?: boolean
   stamped_received?: boolean
+  substituted?: boolean       // the brand sent a different product than the one applied for
 }
 
 export const DEAL_STATE_LABEL: Record<DealState, string> = {

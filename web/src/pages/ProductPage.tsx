@@ -192,7 +192,7 @@ export function ProductPage() {
           <ul className="cards">
             {deals.map((d) => (
               <li key={d.id}>
-                <DealCard deal={d} productSource={p.source}>
+                <DealCard deal={d} productSource={p.source} productName={p.name}>
                   <div className="actions"><Link to={`/deal/${d.id}`} className="link-btn">Open deal</Link><button className="link" onClick={() => setSheet({ kind: 'unlink', deal: d })}>Unlink (wrong product)</button></div>
                 </DealCard>
               </li>

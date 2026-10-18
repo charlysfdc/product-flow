@@ -150,3 +150,4 @@ button.secondary:disabled, button.link:disabled { opacity: 0.5; }
 .disc-open { transform: rotate(90deg); }
 .sec-title { flex: 1; }
 .show-all { display: block; padding: 10px 14px; }
+.substituted { margin: 8px 0 0; padding: 6px 10px; border-radius: 10px; background: var(--chip); }

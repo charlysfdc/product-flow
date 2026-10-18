@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { createProductFromDeal, ignoreDeal, linkDealToProduct, receiveDeal, selectAll, suggestProducts, unlinkDeal } from '../lib/deals'
+import { createProductFromDeal, ignoreDeal, linkDealToProduct, receiveDeal, selectAll, substituteDeal, suggestProducts, unlinkDeal } from '../lib/deals'
 import { SOURCE_HELP, SOURCE_LABEL, SOURCE_ORDER, STATUS_LABEL, type Deal, type Product, type ProductSource } from '../lib/types'
 import { DealCard } from '../components/DealCard'
 import { Options, Sheet } from '../components/Sheet'
@@ -14,7 +14,9 @@ export function DealPage() {
   const [linked, setLinked] = useState<Product | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [picking, setPicking] = useState(false)
+  const [picking, setPicking] = useState<false | 'same' | 'substitute'>(false)
+  const [substitute, setSubstitute] = useState<Product | null>(null)
+  const [substituteSource, setSubstituteSource] = useState<'amazon_sample' | 'bought'>('amazon_sample')
   const [arrived, setArrived] = useState(false)
   const [confirm, setConfirm] = useState<Product | null>(null)
   const [confirmSource, setConfirmSource] = useState<'amazon_sample' | 'bought'>('amazon_sample')
@@ -45,8 +47,16 @@ export function DealPage() {
   const hits = useMemo(() => {
     if (!all) return []
     const s = q.trim().toLowerCase()
-    return (s ? all.filter((p) => p.name.toLowerCase().includes(s) || (p.brand ?? '').toLowerCase().includes(s)) : all).slice(0, 30)
-  }, [all, q])
+    if (s) return all.filter((p) => p.name.toLowerCase().includes(s) || (p.brand ?? '').toLowerCase().includes(s)).slice(0, 30)
+    if (picking === 'substitute' && deal?.brand) {
+      // same-brand products first: that is usually what the brand sent instead
+      const b = deal.brand.toLowerCase()
+      const same = all.filter((p) => (p.brand ?? '').toLowerCase().includes(b) || p.name.toLowerCase().includes(b))
+      const rest = all.filter((p) => !same.includes(p))
+      return [...same, ...rest].slice(0, 30)
+    }
+    return all.slice(0, 30)
+  }, [all, q, picking, deal])
 
   const run = useCallback(async (label: string, fn: () => Promise<string | void>) => {
     setBusy(true)
@@ -69,7 +79,7 @@ export function DealPage() {
       <Link to="/" className="back">‹ Home</Link>
       <h1>Brand deal</h1>
       {error && <p className="error">{error}</p>}
-      <DealCard deal={deal} />
+      <DealCard deal={deal} productSource={linked?.source} productName={linked?.name} />
 
       {linked ? (
         <section>
@@ -88,7 +98,8 @@ export function DealPage() {
           <p className="muted small">When the box turns up, tap "It arrived": that creates the product with the brand, ASIN and image from the deal.</p>
           <div className="actions">
             <button className="primary" disabled={busy} onClick={() => setArrived(true)}>It arrived</button>
-            <button className="secondary" onClick={() => setPicking(true)} disabled={busy}>It is a product I already have…</button>
+            <button className="secondary" onClick={() => setPicking('same')} disabled={busy}>It is a product I already have…</button>
+            <button className="secondary" onClick={() => setPicking('substitute')} disabled={busy}>They sent something else…</button>
             <button className="link" disabled={busy} onClick={() => run('Ignore', async () => {
               await ignoreDeal(supabase, deal)
               return '/'
@@ -112,7 +123,7 @@ export function DealPage() {
             </ul>
           )}
           <div className="actions">
-            <button className="primary" onClick={() => setPicking(true)} disabled={busy}>Same as… (search products)</button>
+            <button className="primary" onClick={() => setPicking('same')} disabled={busy}>Same as… (search products)</button>
             <button className="secondary" disabled={busy} onClick={() => run('Create product', async () => {
               const p = await createProductFromDeal(supabase, deal)
               return `/product/${p.id}`
@@ -121,6 +132,7 @@ export function DealPage() {
               const p = await createProductFromDeal(supabase, deal, { source: 'bought' })
               return `/product/${p.id}`
             })}>Create new — I bought it</button>
+            <button className="secondary" disabled={busy} onClick={() => setPicking('substitute')}>They sent something else…</button>
             <button className="link" disabled={busy} onClick={() => run('Ignore', async () => {
               await ignoreDeal(supabase, deal)
               return '/'
@@ -147,6 +159,28 @@ export function DealPage() {
               return `/product/${confirm.id}`
             })}>Yes, link</button>
             <button className="link" onClick={() => setConfirm(null)}>Cancel</button>
+          </div>
+        </Sheet>
+      )}
+
+      {substitute && (
+        <Sheet title="They sent something else" onClose={() => setSubstitute(null)}>
+          <p>Applied for <b>{deal.title ?? deal.asin}</b>; they sent <b>{substitute.name}</b>?</p>
+          <p className="muted small">The deal is linked to {substitute.name} for the record. Its ASIN, brand and image stay as they are.</p>
+          <Options
+            options={[
+              { value: 'amazon_sample' as const, label: 'Free sample', help: 'The brand sent it through the deal.' },
+              { value: 'bought' as const, label: 'I bought it', help: 'Paid for it yourself; the product is marked Bought.' },
+            ]}
+            value={substituteSource}
+            onPick={setSubstituteSource}
+          />
+          <div className="actions">
+            <button className="primary" disabled={busy} onClick={() => run('Link', async () => {
+              await substituteDeal(supabase, deal, substitute, substituteSource === 'bought' ? 'bought' : undefined)
+              return `/product/${substitute.id}`
+            })}>Yes, link to {substitute.name}</button>
+            <button className="link" onClick={() => setSubstitute(null)}>Cancel</button>
           </div>
         </Sheet>
       )}
@@ -204,13 +238,14 @@ export function DealPage() {
       )}
 
       {picking && (
-        <Sheet title="Same as which product?" onClose={() => setPicking(false)}>
+        <Sheet title={picking === 'substitute' ? 'What did they send?' : 'Same as which product?'} onClose={() => setPicking(false)}>
+          {picking === 'substitute' && <p className="muted small">Pick the product that actually arrived. The deal's own ASIN, title and image are not copied onto it.</p>}
           <input type="search" className="search" placeholder="Search name or brand" value={q} onChange={(e) => setQ(e.target.value)} autoFocus autoCapitalize="none" autoCorrect="off" />
           {!all ? <p className="muted">Loading…</p> : (
             <ul className="list">
               {hits.map((p) => (
                 <li key={p.id}>
-                  <button className="row row-btn" disabled={busy} onClick={() => { setPicking(false); setConfirm(p) }}>
+                  <button className="row row-btn" disabled={busy} onClick={() => { const mode = picking; setPicking(false); mode === 'substitute' ? setSubstitute(p) : setConfirm(p) }}>
                     <span className="row-main"><span className="row-title">{p.name}</span><span className="row-sub">{STATUS_LABEL[p.status]}</span></span>
                     <span className="chev" aria-hidden>›</span>
                   </button>

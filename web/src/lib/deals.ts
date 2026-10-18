@@ -140,19 +140,21 @@ export function suggestProducts(deal: Pick<Deal, 'brand' | 'title'>, products: P
  */
 export async function linkDealToProduct(client: SupabaseClient, deal: Deal, product: Product, extra: LinkAdded = {}, source?: ProductSource): Promise<{ postCreated: boolean }> {
   const added: LinkAdded = { ...extra }
+  // "They sent something else": the deal's ASIN, brand and image belong to the product applied for, not the one that arrived
+  const substituted = Boolean(extra.substituted)
   const patch: Partial<Product> = {}
   const before: NonNullable<LinkAdded['product_before']> = {}
   if (source && source !== product.source) { patch.source = source; before.source = product.source }
   else if (product.source === 'unknown') { patch.source = 'amazon_sample'; before.source = product.source }
-  if (!product.brand && deal.brand) { patch.brand = deal.brand; before.brand = product.brand }
+  if (!substituted && !product.brand && deal.brand) { patch.brand = deal.brand; before.brand = product.brand }
   if (!product.received_at && deal.received_at) { patch.received_at = day(deal.received_at); before.received_at = product.received_at }
-  if (!product.product_image_url && deal.image_url) { patch.product_image_url = deal.image_url; before.product_image_url = product.product_image_url }
+  if (!substituted && !product.product_image_url && deal.image_url) { patch.product_image_url = deal.image_url; before.product_image_url = product.product_image_url }
   if (Object.keys(patch).length) {
     throwIf('update product', (await client.from('products').update(patch).eq('id', product.id)).error)
     added.product_before = before
   }
 
-  if (deal.asin) {
+  if (deal.asin && !substituted) {
     const { data: l, error } = await client.from('listings').select('id').eq('product_id', product.id).eq('platform', 'amazon_us').eq('external_id', deal.asin).limit(1)
     throwIf('read listing', error)
     if (!l?.length) {
@@ -220,6 +222,18 @@ function statusFromDeal(d: Pick<Deal, 'received_at' | 'video_created_at' | 'publ
   if (d.published_at) return 'done'
   if (d.video_created_at) return 'filmed'
   return 'received'
+}
+
+/** The brand sent a different product than the one applied for: link without copying the deal's ASIN, brand or image. */
+export async function substituteDeal(client: SupabaseClient, deal: Deal, arrived: Product, source?: ProductSource): Promise<void> {
+  let stamped = false
+  if (!deal.received_at) {
+    const received = new Date().toISOString()
+    throwIf('stamp received', (await client.from('deals').update({ received_at: received }).eq('id', deal.id)).error)
+    deal = { ...deal, received_at: received }
+    stamped = true
+  }
+  await linkDealToProduct(client, deal, arrived, { substituted: true, stamped_received: stamped }, source)
 }
 
 /**

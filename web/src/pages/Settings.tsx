@@ -3,15 +3,18 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import { importDeals, type ImportSummary } from '../lib/deals'
-import { driveStatus, type DriveStatus } from '../lib/functions'
+import { driveStatus, listFolders, setProductsFolder, type DriveStatus, type FolderListing } from '../lib/functions'
+import { Sheet } from '../components/Sheet'
 
 export function Settings() {
   const { session, signOut, connectDrive, notice } = useAuth()
   const [drive, setDrive] = useState<DriveStatus | null>(null)
   const [driveError, setDriveError] = useState<string | null>(null)
+  const [picking, setPicking] = useState(false)
+  const [tick, setTick] = useState(0)
   useEffect(() => {
     driveStatus().then(setDrive, (e: Error) => setDriveError(e.message))
-  }, [notice])
+  }, [notice, tick])
   const fileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const [summary, setSummary] = useState<ImportSummary | null>(null)
@@ -59,9 +62,19 @@ export function Settings() {
             This needs your permission once; Google then asks nothing again.
           </p>
           {driveError && <p className="error small">{driveError}</p>}
+          {drive?.connected && !drive.products_folder_id && (
+            <p className="flag">Your Content Library was not found. Pick the Products folder that holds your product folders, so new ones go next to them.</p>
+          )}
+          {drive?.connected && (
+            <button className="secondary" style={{ marginBottom: 8 }} onClick={() => setPicking(true)}>
+              {drive.products_folder_id ? 'Change the Products folder' : 'Pick the Products folder'}
+            </button>
+          )}
           <button className={drive?.connected ? 'secondary' : 'primary'} onClick={connectDrive}>{drive?.connected ? 'Connect again' : 'Connect Google Drive'}</button>
         </div>
       </section>
+
+      {picking && <FolderPicker onClose={() => setPicking(false)} onPicked={() => { setPicking(false); setTick((t) => t + 1) }} />}
 
       <section>
         <h2>Brand deals</h2>
@@ -97,5 +110,60 @@ export function Settings() {
         <p className="muted small">Product Flow · data in Supabase, footage in Google Drive.</p>
       </section>
     </main>
+  )
+}
+
+/** Browse Drive folders from My Drive and choose the one that holds the product folders. */
+function FolderPicker({ onClose, onPicked }: { onClose: () => void; onPicked: () => void }) {
+  const [at, setAt] = useState('root')
+  const [listing, setListing] = useState<FolderListing | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    listFolders(at).then((l) => !cancelled && setListing(l), (e: Error) => !cancelled && setError(e.message))
+    return () => { cancelled = true }
+  }, [at])
+  const open = (id: string) => { setListing(null); setError(null); setAt(id) }
+  const choose = async () => {
+    if (!listing) return
+    setBusy(true)
+    try {
+      await setProductsFolder(listing.folder.id)
+      onPicked()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Sheet title="Pick the Products folder" onClose={onClose}>
+      <p className="muted small">Open My Drive → Content Library → Products, then tap Use this folder.</p>
+      {listing && <p><b>{listing.folder.name}</b></p>}
+      {error && <p className="error small">{error}</p>}
+      {!listing && !error && <p className="muted">Loading…</p>}
+      {listing && (
+        <ul className="list">
+          {listing.folder.parent && at !== 'root' && (
+            <li><button className="row row-btn" onClick={() => open(listing.folder.parent!)}><span className="row-main"><span className="row-title">‹ Up</span></span></button></li>
+          )}
+          {listing.folders.slice(0, 60).map((f) => (
+            <li key={f.id}>
+              <button className="row row-btn" onClick={() => open(f.id)}>
+                <span className="row-main"><span className="row-title">{f.name}</span></span>
+                <span className="chev" aria-hidden>›</span>
+              </button>
+            </li>
+          ))}
+          {listing.folders.length > 60 && <li className="row muted small">{listing.folders.length - 60} more folders…</li>}
+        </ul>
+      )}
+      <div className="actions">
+        <button className="primary" disabled={!listing || at === 'root' || busy} onClick={choose}>
+          {busy ? 'Saving…' : listing && at !== 'root' ? `Use “${listing.folder.name}”` : 'Use this folder'}
+        </button>
+      </div>
+    </Sheet>
   )
 }

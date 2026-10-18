@@ -76,13 +76,52 @@ async function loadRow(db: SupabaseClient): Promise<DriveRow> {
   return data as DriveRow
 }
 
-/** My Drive/Content Library/Products, found once and remembered. */
+const NOT_FOUND = "Couldn't find your Content Library. In Settings, tap Pick the Products folder."
+
+interface DriveFile { id: string; name: string; parents?: string[]; mimeType?: string; trashed?: boolean }
+
+const getFile = (token: string, id: string) =>
+  g<DriveFile>(token, `${API}/files/${encodeURIComponent(id)}?fields=id,name,parents,mimeType,trashed&supportsAllDrives=true`)
+
+/**
+ * Where Content Library/Products is, without ever creating one: the folder that
+ * holds the existing product folders (their drive_folder_id parents) wins; a name
+ * search is only a fallback, and only when it finds exactly one candidate.
+ */
+async function locateLibrary(db: SupabaseClient, token: string): Promise<{ library: string | null; products: string } | null> {
+  // 1. parents of known product folders, by majority
+  const { data: known } = await db.from('products').select('drive_folder_id').not('drive_folder_id', 'is', null).limit(12)
+  const votes = new Map<string, number>()
+  for (const r of known ?? []) {
+    try {
+      const f = await getFile(token, r.drive_folder_id as string)
+      if (f.trashed) continue
+      for (const parent of f.parents ?? []) votes.set(parent, (votes.get(parent) ?? 0) + 1)
+    } catch { /* deleted or not shared with this account: skip */ }
+  }
+  const best = [...votes.entries()].sort((a, b) => b[1] - a[1])[0]
+  if (best) {
+    const products = await getFile(token, best[0])
+    return { products: products.id, library: products.parents?.[0] ?? null }
+  }
+  // 2. name search: every "Content Library" folder that has a "Products" child
+  const query = `name = 'Content Library' and mimeType = '${FOLDER}' and trashed = false`
+  const libs = await g<{ files: DriveFile[] }>(token, `${API}/files?q=${encodeURIComponent(query)}&fields=files(id,name,parents)&pageSize=20&supportsAllDrives=true&includeItemsFromAllDrives=true`)
+  const candidates: { library: string; products: string }[] = []
+  for (const lib of libs.files) {
+    const products = await findFolder(token, 'Products', lib.id)
+    if (products) candidates.push({ library: lib.id, products })
+  }
+  return candidates.length === 1 ? candidates[0] : null
+}
+
+/** The stored Products folder; found from the product folders when not stored yet. Never created. */
 async function productsFolder(db: SupabaseClient, token: string, row: DriveRow): Promise<string> {
   if (row.products_folder_id) return row.products_folder_id
-  const library = row.content_library_id ?? (await ensureFolder(token, 'Content Library', 'root')).id
-  const products = (await ensureFolder(token, 'Products', library)).id
-  await db.from('google_drive').update({ content_library_id: library, products_folder_id: products, updated_at: new Date().toISOString() }).eq('id', true)
-  return products
+  const found = await locateLibrary(db, token)
+  if (!found) throw new HttpError(409, NOT_FOUND)
+  await db.from('google_drive').update({ content_library_id: found.library, products_folder_id: found.products, updated_at: new Date().toISOString() }).eq('id', true)
+  return found.products
 }
 
 const folderName = (name: string) => name.replace(/[/\\]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 120)
@@ -103,11 +142,10 @@ serve(async (body, { user, db }) => {
       const row: DriveRow = { email: about.user?.emailAddress ?? user.email ?? null, refresh_token: refresh, content_library_id: null, products_folder_id: null }
       const { error } = await db.from('google_drive').upsert({ id: true, ...row, connected_by: user.id, updated_at: new Date().toISOString() })
       if (error) throw new HttpError(500, /google_drive/.test(error.message) ? 'The Drive table is missing: migration 0005 has not been applied yet.' : error.message)
-      // Look for Content Library/Products now so Settings can say whether it was found.
-      const library = await findFolder(token, 'Content Library', 'root')
-      const products = library ? await findFolder(token, 'Products', library) : null
-      if (library) await db.from('google_drive').update({ content_library_id: library, products_folder_id: products }).eq('id', true)
-      return { email: row.email, products_folder: products }
+      // Find Content Library/Products now so Settings can say whether it was found.
+      const found = await locateLibrary(db, token)
+      if (found) await db.from('google_drive').update({ content_library_id: found.library, products_folder_id: found.products }).eq('id', true)
+      return { email: row.email, products_folder: found?.products ?? null }
     }
 
     case 'create_folder': {
@@ -159,6 +197,26 @@ serve(async (body, { user, db }) => {
       }).select('id').single()
       if (ins.error) throw new HttpError(500, ins.error.message)
       return { media_id: ins.data.id, drive_file_id: file.id }
+    }
+
+    case 'list_folders': {
+      // For the "Pick the Products folder" browser in Settings: subfolders of a folder (My Drive when none).
+      const row = await loadRow(db)
+      const token = await accessToken(row.refresh_token)
+      const parent = String(body.parent ?? 'root')
+      const query = `'${q(parent)}' in parents and mimeType = '${FOLDER}' and trashed = false`
+      const r = await g<{ files: DriveFile[] }>(token, `${API}/files?q=${encodeURIComponent(query)}&fields=files(id,name)&orderBy=name&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`)
+      const here = parent === 'root' ? { id: 'root', name: 'My Drive', parents: [] } : await getFile(token, parent)
+      return { folder: { id: here.id, name: here.name, parent: here.parents?.[0] ?? null }, folders: r.files.map((f) => ({ id: f.id, name: f.name })) }
+    }
+
+    case 'set_products_folder': {
+      const row = await loadRow(db)
+      const token = await accessToken(row.refresh_token)
+      const f = await getFile(token, String(body.folder_id ?? ''))
+      if (f.mimeType !== FOLDER || f.trashed) throw new HttpError(400, 'That is not a folder.')
+      await db.from('google_drive').update({ products_folder_id: f.id, content_library_id: f.parents?.[0] ?? null, updated_at: new Date().toISOString() }).eq('id', true)
+      return { products_folder_id: f.id, name: f.name }
     }
 
     default:

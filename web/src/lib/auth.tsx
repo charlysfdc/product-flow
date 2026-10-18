@@ -21,7 +21,9 @@ async function saveDriveToken(s: Session | null): Promise<string | null> {
     const r = await callFunction<{ email: string | null; products_folder: string | null }>('drive', {
       action: 'save_token', refresh_token: s.provider_refresh_token,
     })
-    return `Google Drive is connected${r.email ? ` (${r.email})` : ''}.${r.products_folder ? '' : ' Content Library/Products was not found; it will be created on first use.'}`
+    return r.products_folder
+      ? `Google Drive is connected${r.email ? ` (${r.email})` : ''}.`
+      : `Google Drive is connected, but your Content Library was not found. Open Settings and tap Pick the Products folder.`
   } catch (e) {
     return `Drive did not connect: ${(e as Error).message}`
   } finally {

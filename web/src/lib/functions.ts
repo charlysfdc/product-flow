@@ -56,3 +56,11 @@ export const uploadPhoto = (productId: string, photo: { base64: string; width: n
     filename: `intake ${new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '.')}.jpg`,
     data: photo.base64, width: photo.width, height: photo.height,
   })
+
+export interface FolderListing { folder: { id: string; name: string; parent: string | null }; folders: { id: string; name: string }[] }
+
+/** Subfolders of a Drive folder ('root' = My Drive), for picking the Products folder by hand. */
+export const listFolders = (parent = 'root') => callFunction<FolderListing>('drive', { action: 'list_folders', parent })
+
+export const setProductsFolder = (folderId: string) =>
+  callFunction<{ products_folder_id: string; name: string }>('drive', { action: 'set_products_folder', folder_id: folderId })

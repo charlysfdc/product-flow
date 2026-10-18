@@ -139,7 +139,8 @@ a.chip { color: var(--text); }
 .option-help { grid-column: 1; color: var(--muted); font-size: 14px; }
 .option .tick { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--accent); font-weight: 700; }
 .form { display: grid; gap: 12px; margin-top: 12px; }
-.form label { display: grid; gap: 4px; font-size: 15px; font-weight: 600; }
+.form label { display: block; font-size: 15px; font-weight: 600; }
+.form label > input, .form label > textarea { display: block; margin-top: 5px; }
 .form input, .form textarea { font: inherit; font-size: 17px; font-weight: 400; padding: 11px 13px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--text); width: 100%; }
 .sheet .search { margin-top: 4px; }
 .sheet .list { margin-top: 8px; }

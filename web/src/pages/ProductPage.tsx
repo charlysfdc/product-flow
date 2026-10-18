@@ -71,7 +71,8 @@ export function ProductPage() {
   const { product: p, listings, posts, jobs, deals, media } = detail
   const due = deadlineText(p.deadline)
   const totalViews = posts.reduce((n, po) => n + (po.views ?? 0), 0)
-  const folderUrl = driveFolderUrl(p)
+  // only a real folder id: products without one get the Make Drive folder button
+  const folderUrl = p.drive_folder_id ? driveFolderUrl({ drive_folder_id: p.drive_folder_id }) : null
   const allPosted = checklist.length > 0 && checklist.every((c) => c.posted)
 
   const setStatus = (status: ProductStatus) =>

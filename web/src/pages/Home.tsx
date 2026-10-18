@@ -193,7 +193,9 @@ export function Home() {
                     {step.button
                       ? <button className="pri" disabled={busy === p.id} onClick={() => advance(p)}>{step.button}</button>
                       : <Link className="pri" to={`/product/${p.id}`}>{p.status === 'ready' ? 'Mark posted' : 'Open'}</Link>}
-                    <Link to={`/product/${p.id}`}>Open</Link>
+                    {step.button || !p.drive_folder_id
+                      ? <Link to={`/product/${p.id}`}>Open</Link>
+                      : <a href={`https://drive.google.com/drive/folders/${p.drive_folder_id}`} target="_blank" rel="noreferrer">Open Drive</a>}
                   </div>
                 </div>
               )

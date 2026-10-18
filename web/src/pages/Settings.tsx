@@ -1,11 +1,17 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import { importDeals, type ImportSummary } from '../lib/deals'
+import { driveStatus, type DriveStatus } from '../lib/functions'
 
 export function Settings() {
-  const { session, signOut } = useAuth()
+  const { session, signOut, connectDrive, notice } = useAuth()
+  const [drive, setDrive] = useState<DriveStatus | null>(null)
+  const [driveError, setDriveError] = useState<string | null>(null)
+  useEffect(() => {
+    driveStatus().then(setDrive, (e: Error) => setDriveError(e.message))
+  }, [notice])
   const fileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const [summary, setSummary] = useState<ImportSummary | null>(null)
@@ -41,6 +47,19 @@ export function Settings() {
           <div className="card-title">{user?.user_metadata?.full_name ?? user?.email}</div>
           <div className="muted small">{user?.email}</div>
           <button className="link" onClick={signOut}>Sign out</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Google Drive</h2>
+        <div className="card">
+          <div className="card-title">{drive?.connected ? `Connected${drive.email ? ` as ${drive.email}` : ''}` : drive ? 'Not connected' : driveError ? 'Status unknown' : 'Checking…'}</div>
+          <p className="muted small">
+            Add product makes a folder in Content Library/Products for each new product and saves the photo of the box there.
+            This needs your permission once; Google then asks nothing again.
+          </p>
+          {driveError && <p className="error small">{driveError}</p>}
+          <button className={drive?.connected ? 'secondary' : 'primary'} onClick={connectDrive}>{drive?.connected ? 'Connect again' : 'Connect Google Drive'}</button>
         </div>
       </section>
 

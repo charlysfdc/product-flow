@@ -40,6 +40,9 @@ Current project: `cjtiiufrtmwdqgikpcxi` (created 18 Oct 2026, East US).
 SUPABASE_DB_URL='postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres' seed/.venv/bin/python seed/apply_migrations.py
 ```
 
+`0001_init.sql` was applied by hand in the SQL editor on 18 Oct 2026; before the
+next migration record that once with `... apply_migrations.py --mark 0001_init.sql`.
+
 (`seed/.venv` is a Python virtualenv with `psycopg`; recreate it with
 `python3 -m venv seed/.venv && seed/.venv/bin/pip install "psycopg[binary]"`.)
 

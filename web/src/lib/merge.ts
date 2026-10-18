@@ -2,9 +2,10 @@ import { supabase } from './supabase'
 import { STATUS_ORDER, type Listing, type Product } from './types'
 
 /**
- * Merge `source` into `target`: move listings, media, posts and jobs across,
- * fill the target's empty fields from the source, keep the chosen name, then
- * delete the source. Runs as a sequence of small writes (two users, no races).
+ * Merge `source` into `target`: move listings, media, posts, jobs and deals
+ * across, fill the target's empty fields from the source, keep both Drive
+ * folders, keep the chosen name, then delete the source. Runs as a sequence
+ * of small writes (two users, no races).
  */
 export async function mergeProducts(source: Product, target: Product, keepName: string): Promise<void> {
   const fail = (step: string, e: { message: string } | null) => {
@@ -25,18 +26,24 @@ export async function mergeProducts(source: Product, target: Product, keepName: 
     }
   }
 
-  for (const table of ['media', 'posts', 'jobs'] as const) {
+  for (const table of ['media', 'posts', 'jobs', 'deals'] as const) {
     fail(`move ${table}`, (await supabase.from(table).update({ product_id: target.id }).eq('product_id', source.id)).error)
   }
 
   const pick = <K extends keyof Product>(k: K) => target[k] ?? source[k]
   const status = STATUS_ORDER.indexOf(source.status) > STATUS_ORDER.indexOf(target.status) ? source.status : target.status
-  const notes = [target.notes, source.notes && `Merged from "${source.name}":\n${source.notes}`].filter(Boolean).join('\n\n') || null
+  let notes = [target.notes, source.notes && `Merged from "${source.name}":\n${source.notes}`].filter(Boolean).join('\n\n') || null
+
+  // both have a Drive folder: keep the source's as an extra link
+  const extras = [...(target.extra_drive_folders ?? []), ...(source.extra_drive_folders ?? [])]
+  if (target.drive_folder_id && source.drive_folder_id && source.drive_folder_id !== target.drive_folder_id) {
+    extras.push({ id: source.drive_folder_id, name: source.drive_folder_name })
+  }
 
   // delete the source first so the kept name cannot collide with it
   fail('delete duplicate', (await supabase.from('products').delete().eq('id', source.id)).error)
 
-  fail('update kept product', (await supabase.from('products').update({
+  const patch = {
     name: keepName,
     brand: pick('brand'),
     variant: pick('variant'),
@@ -49,5 +56,14 @@ export async function mergeProducts(source: Product, target: Product, keepName: 
     source: target.source === 'unknown' ? source.source : target.source,
     status,
     notes,
-  }).eq('id', target.id)).error)
+  }
+  let res = await supabase.from('products').update({ ...patch, extra_drive_folders: extras }).eq('id', target.id)
+  if (res.error?.code === 'PGRST204') {
+    // migration 0004 not applied yet: keep the extra folder as a note instead
+    if (extras.length) {
+      notes = [notes, ...extras.map((f) => `Also in Drive folder: ${f.name ?? f.id} (https://drive.google.com/drive/folders/${f.id})`)].filter(Boolean).join('\n')
+    }
+    res = await supabase.from('products').update({ ...patch, notes }).eq('id', target.id)
+  }
+  fail('update kept product', res.error)
 }

@@ -16,6 +16,7 @@ export interface Product {
   deadline: string | null
   drive_folder_id: string | null
   drive_folder_name: string | null
+  extra_drive_folders?: { id: string | null; name: string | null }[]   // migration 0004
   product_image_url: string | null
   received_at: string | null
   notes: string | null
@@ -124,9 +125,11 @@ export function quietCutoffIso(now = Date.now()): string {
 }
 export const ACTIVE_DEAL_STATUSES = ACTIVE_STATUSES
 
-export function driveFolderUrl(p: Pick<Product, 'drive_folder_id' | 'drive_folder_name'>): string | null {
-  if (p.drive_folder_id) return `https://drive.google.com/drive/folders/${p.drive_folder_id}`
-  if (p.drive_folder_name) return `https://drive.google.com/drive/search?q=${encodeURIComponent(p.drive_folder_name)}`
+export function driveFolderUrl(p: { drive_folder_id?: string | null; drive_folder_name?: string | null; id?: string | null; name?: string | null }): string | null {
+  const id = p.drive_folder_id ?? p.id
+  const name = p.drive_folder_name ?? p.name
+  if (id) return `https://drive.google.com/drive/folders/${id}`
+  if (name) return `https://drive.google.com/drive/search?q=${encodeURIComponent(name)}`
   return null
 }
 

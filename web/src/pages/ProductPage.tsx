@@ -143,7 +143,12 @@ export function ProductPage() {
           {p.received_at && <><dt>Received</dt><dd>{fmtDate(p.received_at)}</dd></>}
           {p.deadline && <><dt>Deadline</dt><dd>{fmtDate(p.deadline)}</dd></>}
           <dt>Drive folder</dt>
-          <dd>{folderUrl ? <a href={folderUrl} target="_blank" rel="noreferrer">{p.drive_folder_name ?? 'Open in Drive'} ↗</a> : <span className="muted">No Drive folder yet</span>}</dd>
+          <dd>
+            {folderUrl ? <a href={folderUrl} target="_blank" rel="noreferrer">{p.drive_folder_name ?? 'Open in Drive'} ↗</a> : <span className="muted">No Drive folder yet</span>}
+            {(p.extra_drive_folders ?? []).map((f, i) => (
+              <div key={i}><a href={driveFolderUrl(f) ?? '#'} target="_blank" rel="noreferrer">{f.name ?? 'Second folder'} ↗</a> <span className="muted small">(also)</span></div>
+            ))}
+          </dd>
         </dl>
       </header>
 

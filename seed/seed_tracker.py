@@ -69,6 +69,9 @@ class Api:
         if self.dry_run:
             print(f"  [dry-run] would insert {len(rows)} into {table}")
             return [dict(r, id=f"dry-{i}") for i, r in enumerate(rows)]
+        # PostgREST bulk inserts need identical keys on every row
+        keys = sorted({k for r in rows for k in r})
+        rows = [{k: r.get(k) for k in keys} for r in rows]
         out = []
         for i in range(0, len(rows), 200):
             out.extend(self._req("POST", table, rows[i:i + 200]))

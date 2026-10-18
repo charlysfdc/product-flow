@@ -28,6 +28,21 @@ begin
   return new;
 end $$;
 
+-- allowed_emails: only these Google accounts may sign in --------------------
+
+create table allowed_emails (
+  email text primary key,
+  note text,
+  created_at timestamptz not null default now()
+);
+insert into allowed_emails (email, note) values ('afrikanerinamerika@gmail.com', 'Charly');
+-- Add Zanje with: insert into allowed_emails (email, note) values ('<her gmail>', 'Zanje');
+
+create or replace function is_allowed() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from allowed_emails where lower(email) = lower(coalesce(auth.jwt() ->> 'email', '')));
+$$;
+
 -- profiles: one row per signed-in Google account -------------------------
 
 create table profiles (
@@ -41,6 +56,9 @@ create table profiles (
 create or replace function handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
+  if not exists (select 1 from allowed_emails where lower(email) = lower(coalesce(new.email, ''))) then
+    raise exception 'This Google account is not allowed to sign in to Product Flow';
+  end if;
   insert into profiles (id, email, display_name, avatar_url)
   values (
     new.id,
@@ -164,7 +182,7 @@ create index jobs_status_idx on jobs (status, created_at);
 create index jobs_product_idx on jobs (product_id);
 create trigger jobs_updated_at before update on jobs for each row execute function set_updated_at();
 
--- Row-level security: any signed-in user has full access -------------------
+-- Row-level security: any allowed signed-in user has full access -----------
 
 alter table profiles enable row level security;
 alter table products enable row level security;
@@ -173,14 +191,17 @@ alter table media    enable row level security;
 alter table posts    enable row level security;
 alter table jobs     enable row level security;
 
-create policy "signed-in read profiles"  on profiles for select to authenticated using (true);
-create policy "own profile update"       on profiles for update to authenticated using (id = auth.uid()) with check (id = auth.uid());
+alter table allowed_emails enable row level security;
 
-create policy "signed-in all products"   on products for all to authenticated using (true) with check (true);
-create policy "signed-in all listings"   on listings for all to authenticated using (true) with check (true);
-create policy "signed-in all media"      on media    for all to authenticated using (true) with check (true);
-create policy "signed-in all posts"      on posts    for all to authenticated using (true) with check (true);
-create policy "signed-in all jobs"       on jobs     for all to authenticated using (true) with check (true);
+create policy "allowed read profiles"  on profiles for select to authenticated using (is_allowed());
+create policy "own profile update"     on profiles for update to authenticated using (id = auth.uid() and is_allowed()) with check (id = auth.uid());
+create policy "allowed read allowed"   on allowed_emails for select to authenticated using (is_allowed());
+
+create policy "allowed all products"   on products for all to authenticated using (is_allowed()) with check (is_allowed());
+create policy "allowed all listings"   on listings for all to authenticated using (is_allowed()) with check (is_allowed());
+create policy "allowed all media"      on media    for all to authenticated using (is_allowed()) with check (is_allowed());
+create policy "allowed all posts"      on posts    for all to authenticated using (is_allowed()) with check (is_allowed());
+create policy "allowed all jobs"       on jobs     for all to authenticated using (is_allowed()) with check (is_allowed());
 
 -- Realtime: let the phone subscribe to changes
 alter publication supabase_realtime add table products, jobs, posts;

@@ -6,6 +6,7 @@ import type { Deal, Job, Platform, Product } from '../lib/types'
 import { suggestProducts } from '../lib/deals'
 import { PLATFORM_LABEL, PLATFORM_ORDER } from '../lib/types'
 import { ProductRow, daysUntil } from '../components/ProductRow'
+import { Section } from '../components/Section'
 
 type View =
   | { kind: 'search'; search: Product[] }
@@ -125,28 +126,15 @@ export function Home() {
       {view && view.kind === 'lists' && (
         <>
           {view.dueSoon.length > 0 && (
-            <section>
-              <h2>Due soon <span className="count">{view.dueSoon.length}</span></h2>
-              <ul className="list">{view.dueSoon.map((p) => <ProductRow key={p.id} product={p} showStatus />)}</ul>
-            </section>
+            <Section id="due" title="Due soon" count={view.dueSoon.length}>
+              {(limit) => <ul className="list">{view.dueSoon.slice(0, limit).map((p) => <ProductRow key={p.id} product={p} showStatus />)}</ul>}
+            </Section>
           )}
 
-          <section>
-            <h2>Received, not filmed <span className="count">{view.received.length}</span></h2>
-            {view.received.length === 0 ? (
-              <p className="empty">Nothing waiting to be filmed.</p>
-            ) : (
-              <ul className="list">{view.received.map((p) => <ProductRow key={p.id} product={p} detail={p.status === 'expected' ? 'Expected' : null} />)}</ul>
-            )}
-          </section>
-
-          <section>
-            <h2>Needs your answer <span className="count">{view.needsAnswer.length + view.dealsToAnswer.length}</span></h2>
-            {view.needsAnswer.length + view.dealsToAnswer.length === 0 ? (
-              <p className="empty">Nothing is waiting on you.</p>
-            ) : (
+          <Section id="answer" title="Needs your answer" count={view.needsAnswer.length + view.dealsToAnswer.length} empty="Nothing is waiting on you.">
+            {(limit) => (
               <ul className="list">
-                {view.dealsToAnswer.map(({ deal: d, suggestion }) => (
+                {[...view.dealsToAnswer.map(({ deal: d, suggestion }) => (
                   <li key={d.id}>
                     <Link to={`/deal/${d.id}`} className="row">
                       {d.image_url && <img src={d.image_url} alt="" className="thumb" />}
@@ -157,52 +145,47 @@ export function Home() {
                       <span className="chev" aria-hidden>›</span>
                     </Link>
                   </li>
-                ))}
-                {view.needsAnswer.map(({ job, product }) => (
+                )), ...view.needsAnswer.map(({ job, product }) => (
                   <ProductRow key={job.id} product={product} detail={job.question ?? `${job.type} needs review`} />
-                ))}
+                ))].slice(0, limit)}
               </ul>
             )}
-          </section>
-
-          <section>
-            <h2>Ready to post <span className="count">{view.ready.reduce((n, g) => n + g.items.length, 0)}</span></h2>
-            {view.ready.length === 0 ? (
-              <p className="empty">Nothing finished is waiting to be posted.</p>
-            ) : (
-              view.ready.map((g) => (
-                <div key={g.key}>
-                  <h3>{g.label}</h3>
-                  <ul className="list">{g.items.map((p) => <ProductRow key={p.id} product={p} />)}</ul>
-                </div>
-              ))
-            )}
-          </section>
-
-          <section>
-            <h2>Filmed, needs an edit <span className="count">{view.filmed.length}</span></h2>
-            {view.filmed.length === 0 ? (
-              <p className="empty">No raw footage is waiting.</p>
-            ) : (
-              <ul className="list">{view.filmed.map((p) => <ProductRow key={p.id} product={p} />)}</ul>
-            )}
-          </section>
+          </Section>
 
           {(view.waiting > 0 || view.quiet > 0) && (
-            <section>
-              <ul className="list">
-                <li>
-                  <Link to="/deals/waiting" className="row">
-                    <div className="row-main">
-                      <div className="row-title">Waiting on brand <span className="count">{view.waiting}</span></div>
-                      <div className="row-sub"><span>Deals you messaged, nothing arrived yet</span>{view.quiet > 0 && <span>{view.quiet} went quiet</span>}</div>
-                    </div>
-                    <span className="chev" aria-hidden>›</span>
-                  </Link>
-                </li>
-              </ul>
-            </section>
+            <Section id="waiting" title="Waiting on brand" count={view.waiting}>
+              {() => (
+                <ul className="list">
+                  <li>
+                    <Link to="/deals/waiting" className="row">
+                      <div className="row-main">
+                        <div className="row-title">See the {view.waiting} deals still waiting</div>
+                        <div className="row-sub"><span>Brands you messaged, nothing arrived yet</span>{view.quiet > 0 && <span>{view.quiet} went quiet</span>}</div>
+                      </div>
+                      <span className="chev" aria-hidden>›</span>
+                    </Link>
+                  </li>
+                </ul>
+              )}
+            </Section>
           )}
+
+          <Section id="received" title="Not filmed" count={view.received.length} preview={5} empty="Nothing waiting to be filmed.">
+            {(limit) => <ul className="list">{view.received.slice(0, limit).map((p) => <ProductRow key={p.id} product={p} detail={p.status === 'expected' ? 'On its way' : null} />)}</ul>}
+          </Section>
+
+          <Section id="ready" title="Ready to post" count={view.ready.reduce((n, g) => n + g.items.length, 0)} defaultOpen={false} empty="Nothing finished is waiting to be posted.">
+            {() => view.ready.map((g) => (
+              <div key={g.key}>
+                <h3>{g.label}</h3>
+                <ul className="list">{g.items.map((p) => <ProductRow key={p.id} product={p} />)}</ul>
+              </div>
+            ))}
+          </Section>
+
+          <Section id="filmed" title="Filmed, not edited" count={view.filmed.length} defaultOpen={false} empty="No raw footage is waiting.">
+            {(limit) => <ul className="list">{view.filmed.slice(0, limit).map((p) => <ProductRow key={p.id} product={p} />)}</ul>}
+          </Section>
 
           <p className="muted small footer">
             {view.counts.total} products, {view.counts.done} done. Search to find any of them.

@@ -141,3 +141,12 @@ button.secondary:disabled, button.link:disabled { opacity: 0.5; }
 .deal-closed { background: var(--chip); color: var(--muted); }
 .toggle { display: flex; gap: 8px; align-items: center; font-size: 15px; margin: 8px 0 12px; }
 .pager { display: flex; justify-content: space-between; align-items: center; margin: 12px 0; }
+
+/* collapsible home sections */
+.sec { margin-top: 14px; }
+.sec-head { width: 100%; display: flex; align-items: center; gap: 8px; background: none; border: 0; padding: 8px 0; color: var(--muted); font: inherit; font-size: 15px; text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer; text-align: left; }
+.sec-head .count { color: var(--text); }
+.disc { display: inline-block; transition: transform 0.15s; font-size: 20px; line-height: 1; width: 14px; }
+.disc-open { transform: rotate(90deg); }
+.sec-title { flex: 1; }
+.show-all { display: block; padding: 10px 14px; }

@@ -322,6 +322,13 @@ export function ProductPage() {
         <div className="actions">
           <UploadButton product={p} className="secondary" label={clips.length ? 'Upload more clips' : 'Upload clips'} />
           <button className="secondary" disabled={syncing} onClick={() => sync(true)}>{syncing ? 'Looking in Drive…' : 'Sync from Drive'}</button>
+          {clips.length > 0 && (p.status === 'ready' || p.status === 'done') && (
+            edit && (edit.status === 'queued' || edit.status === 'running')
+              ? <span className="muted small" style={{ alignSelf: 'center' }}>Editing · {edit.output?.progress?.pct ?? 0}%</span>
+              : edit?.status === 'needs_review'
+              ? <Link className="secondary link-btn" to={`/review/${edit.id}`} style={{ padding: '11px 14px' }}>Review the edit</Link>
+              : <button className="secondary" onClick={openEdit}>Make an edit</button>
+          )}
         </div>
         {p.status !== 'received' && syncNote && <p className="sync-note">{syncNote}</p>}
         {p.status !== 'received' && <p className="tip">{ORIGINAL_TIP}</p>}

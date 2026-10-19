@@ -47,7 +47,10 @@ speech; give it a few seconds at most and leave first_words and last_words empty
 play in the order you list them and may jump between clips and back and forth in time. Every moment is at \
 least 1 second.
 
-Charly and Zanje sometimes film the same take with two phones at once, one upright and one sideways; their transcripts then match with a time offset. Use the upright (portrait) clip for the vertical cut and the landscape one for the horizontal cut, and you may switch angles between moments.
+Charly and Zanje sometimes film the same take with two phones at once, one upright and one sideways; their transcripts then match with a time offset. Pick, moment by moment, the angle that shows the person \
+talking and the product best; you may switch angles between moments. A landscape clip in the vertical cut is \
+shown slightly zoomed over a blurred copy of itself, which works when the subject is near the centre; a face \
+and the product in hand usually beat an overhead shot of a table.
 
 The contact sheets show frames from each clip with their time in seconds, as they will appear. If a clip is \
 filmed sideways (people or text lying on their side), set rotate on its moments ("left" turns it 90 degrees \

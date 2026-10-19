@@ -60,7 +60,8 @@ async function start(db: SupabaseClient, userId: string, productId: string, clip
     output: { progress: { step: 'Waiting for the worker', pct: 0 } },
   }).select('id').single()
   if (error) throw new HttpError(500, error.message)
-  await db.from('products').update({ status: 'editing' }).eq('id', p.id)
+  // only a product waiting for its edit shows as Editing; an extra cut of a Ready or Posted one keeps its status
+  await db.from('products').update({ status: 'editing' }).eq('id', p.id).in('status', ['received', 'filmed', 'editing'])
   const warning = await wake(db, job.id)
   return { job_id: job.id, already: false, warning }
 }

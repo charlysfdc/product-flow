@@ -3,6 +3,8 @@
 Same rule as the July engine (thumbnail_utils.py): the people in a thumbnail are always the real people
 from the video. Nothing here generates or alters faces; it crops, lifts colour and adds text.
 """
+from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 from .text import font, norm, YELLOW
@@ -32,7 +34,29 @@ def _base(frame: Image.Image) -> Image.Image:
     return ImageEnhance.Sharpness(img).enhance(1.2)
 
 
-def make(frame_path: str, text: str, keys: set[str], position: str, out: str) -> None:
+YUNET = str(Path(__file__).resolve().parent.parent / "assets" / "face_detection_yunet_2023mar.onnx")
+
+
+def faces(img: Image.Image) -> list[tuple[int, int, int, int]]:
+    """Face boxes (x, y, w, h) in the thumbnail (YuNet, as in the July engine), so the words never cover a face."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return []
+    bgr = cv2.cvtColor(np.asarray(img.convert("RGB")), cv2.COLOR_RGB2BGR)
+    det = cv2.FaceDetectorYN.create(YUNET, "", (bgr.shape[1], bgr.shape[0]), 0.8, 0.3, 50)
+    _, found = det.detect(bgr)
+    return [] if found is None else [tuple(int(v) for v in f[:4]) for f in found]
+
+
+def _overlap(zone: tuple[int, int], boxes) -> int:
+    top, bottom = zone
+    return sum(max(0, min(bottom, y + h) - max(top, y)) * w for x, y, w, h in boxes)
+
+
+def make(frame_path: str, text: str, keys: set[str], position: str, out: str) -> str:
+    """Writes the thumbnail; returns where the words went (top/bottom)."""
     img = _base(Image.open(frame_path)).convert("RGBA")
     words = text.upper().split()
     px = 104 if len(text) <= 18 else 88 if len(text) <= 30 else 74
@@ -48,6 +72,12 @@ def make(frame_path: str, text: str, keys: set[str], position: str, out: str) ->
         rows.append(row)
     lh = int(px * 1.1)
     block = len(rows) * lh
+    # the planned side, unless a face is there and the other side is clearer
+    boxes = faces(img)
+    zones = {"top": (0, 40 + block + 20), "bottom": (H - 48 - block - 20, H)}
+    other = "bottom" if position == "top" else "top"
+    if boxes and _overlap(zones[position], boxes) > _overlap(zones[other], boxes):
+        position = other
     top = 40 if position == "top" else H - 48 - block
     # a soft dark band behind the words so they read on any frame
     shade = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -68,3 +98,4 @@ def make(frame_path: str, text: str, keys: set[str], position: str, out: str) ->
             x += d.textlength(w + " ", font=fnt)
         y += lh
     img.convert("RGB").save(out, "JPEG", quality=92)
+    return position

@@ -28,7 +28,7 @@ secret = modal.Secret.from_name("product-flow-worker", required_keys=["WORKER_SE
 
 edit_image = (
     modal.Image.debian_slim(python_version="3.12")
-    .uv_pip_install("imageio-ffmpeg==0.6.0", "pillow==13.0.0", "numpy==2.5.4", "anthropic==1.15.0", "requests==2.34.2", "fastapi[standard]==0.146.0")
+    .uv_pip_install("imageio-ffmpeg==0.6.0", "pillow==13.0.0", "numpy==2.5.4", "opencv-python-headless==5.0.0.93", "anthropic==1.15.0", "requests==2.34.2", "fastapi[standard]==0.146.0")
     # the static ffmpeg must have what the recipe uses: x264, zscale (HDR) and tonemap
     .run_commands("python -c \"import imageio_ffmpeg,subprocess;f=imageio_ffmpeg.get_ffmpeg_exe();"
                   "o=subprocess.run([f,'-hide_banner','-filters'],capture_output=True,text=True).stdout+subprocess.run([f,'-hide_banner','-encoders'],capture_output=True,text=True).stdout;"

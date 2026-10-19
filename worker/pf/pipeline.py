@@ -188,7 +188,9 @@ def run(ctx: dict, io: IO, work: Path) -> dict:
     tframe = work / "thumb_frame.jpg"
     ffx.frame(tc.path, min(float(t["time"]), tc.probe.duration - 0.1), str(tframe), tc.probe.hdr, width=1920)
     t_out = str(work / f"{stem} - thumbnail ({v_tag}).jpg")
-    thumb.make(str(tframe), t["text"], keys, t["text_position"], t_out)
+    placed = thumb.make(str(tframe), t["text"], keys, t["text_position"], t_out)
+    if placed != t["text_position"]:
+        io.log(f"Thumbnail words moved to the {placed} so they don't cover a face.")
     timer.mark("thumbnail")
 
     # 8. into finished/

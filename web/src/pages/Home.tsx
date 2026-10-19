@@ -47,10 +47,17 @@ function unposted(p: Product, listings: Listing[], posts: Post[]): Platform[] {
 const STEP: Record<ProductStatus, { verb: string; next: ProductStatus | null; button: string | null }> = {
   expected: { verb: 'Arriving', next: 'received', button: 'It arrived' },
   received: { verb: 'Film', next: 'filmed', button: 'I filmed it' },
-  filmed: { verb: 'Edit', next: 'ready', button: 'It’s edited' },
-  editing: { verb: 'Edit', next: 'ready', button: 'It’s edited' },
+  filmed: { verb: 'Edit', next: null, button: null },
+  editing: { verb: 'Editing', next: null, button: null },
   ready: { verb: 'Post', next: null, button: null },
   done: { verb: 'Done', next: null, button: null },
+}
+
+function editLabel(j: Job | undefined): string {
+  if (!j) return 'Open'
+  if (j.status === 'needs_review') return 'Review the edit'
+  if (j.status === 'queued') return 'Waiting for the worker'
+  return `Editing · ${j.progress?.pct ?? 0}%`
 }
 
 const preview = (items: { name: string }[]) => {
@@ -93,6 +100,7 @@ export function Home() {
       return { deal, suggestion: s ? { id: s.id, name: s.name } : null }
     })
     const jobRows = jobs
+      .filter((j) => j.status === 'needs_review')
       .map((j) => ({ job: j, product: j.product_id ? byId.get(j.product_id) : undefined }))
       .filter((x): x is { job: Job; product: Product } => Boolean(x.product))
 
@@ -137,6 +145,17 @@ export function Home() {
     if (error) setActionError(`Could not update ${p.name}: ${error.message}`)
     setBusy(null)
   }
+
+  // the latest edit job per product, for progress on Edit rows and cards
+  const editing = useMemo(() => {
+    const m = new Map<string, Job>()
+    for (const j of data?.jobs ?? []) {
+      if (j.type !== 'edit' || !j.product_id) continue
+      const have = m.get(j.product_id)
+      if (!have || have.created_at < j.created_at) m.set(j.product_id, j)
+    }
+    return m
+  }, [data])
 
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
   const things = view?.kind === 'lists' ? view.due.length + view.askCards.length : 0
@@ -193,6 +212,10 @@ export function Home() {
                   <div className="go">
                     {p.status === 'received'
                       ? <UploadButton product={p} className="pri" onStarted={() => navigate(`/product/${p.id}`)} />
+                      : p.status === 'filmed'
+                      ? <Link className="pri" to={`/product/${p.id}`} state={{ edit: true }}>Edit</Link>
+                      : p.status === 'editing'
+                      ? <Link className="pri" to={editing.get(p.id)?.status === 'needs_review' ? `/review/${editing.get(p.id)!.id}` : `/product/${p.id}`}>{editLabel(editing.get(p.id))}</Link>
                       : step.button
                       ? <button className="pri" disabled={busy === p.id} onClick={() => advance(p)}>{step.button}</button>
                       : <Link className="pri" to={`/product/${p.id}`}>{p.status === 'ready' ? 'Mark posted' : 'Open'}</Link>}
@@ -235,7 +258,7 @@ export function Home() {
             </Section>
 
             <Section id="edit" title="Edit" sub="Raw clips waiting in Drive" count={view.edit.length} preview={8} empty="No raw footage is waiting.">
-              {(limit) => <ul className="list">{view.edit.slice(0, limit).map((p) => <ProductRow key={p.id} product={p} />)}</ul>}
+              {(limit) => <ul className="list">{view.edit.slice(0, limit).map((p) => <ProductRow key={p.id} product={p} detail={p.status === 'editing' ? editLabel(editing.get(p.id)) : null} />)}</ul>}
             </Section>
 
             <Section id="post" title="Post" sub={view.ready.map((g) => g.label).join(', ') || 'Nothing finished is waiting'} count={view.readyCount} empty="Nothing finished is waiting to be posted.">
@@ -262,7 +285,18 @@ export function Home() {
                           <span className="chev" aria-hidden>›</span>
                         </Link>
                       </li>
-                    )), ...view.jobs.map(({ job, product }) => (
+                    )), ...view.jobs.map(({ job, product }) => job.type === 'edit' ? (
+                      <li key={job.id}>
+                        <Link to={`/review/${job.id}`} className="row">
+                          <Thumb src={product.product_image_url} name={product.name} />
+                          <div className="row-main">
+                            <div className="row-title">{product.name}</div>
+                            <div className="row-sub"><span>{job.question ?? 'Review the edit'}</span></div>
+                          </div>
+                          <span className="chev" aria-hidden>›</span>
+                        </Link>
+                      </li>
+                    ) : (
                       <ProductRow key={job.id} product={product} detail={job.question ?? `${job.type} needs review`} />
                     ))].slice(0, limit)}
                   </ul>

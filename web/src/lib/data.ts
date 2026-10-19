@@ -28,7 +28,7 @@ export function useSnapshot() {
       supabase.from('products').select('*').order('name'),
       supabase.from('listings').select('id,product_id,platform,external_id,url,commission,availability,availability_note,checked_at'),
       supabase.from('posts').select('id,product_id,platform,status,title,url,posted_at,views'),
-      supabase.from('jobs').select('id,product_id,type,status,question,created_at').eq('status', 'needs_review'),
+      supabase.from('jobs').select('id,product_id,type,status,question,created_at,updated_at,progress:output->progress').in('status', ['needs_review', 'queued', 'running']),
       supabase.from('deals').select('*').eq('match_status', 'needs_review').order('deal_created_at', { ascending: false }),
       supabase.from('deals').select('id', { count: 'exact', head: true }).eq('match_status', 'waiting').or(stillWaitingFilter()),
       supabase.from('deals').select('id', { count: 'exact', head: true }).eq('match_status', 'waiting'),
@@ -93,6 +93,28 @@ export function useProduct(id: string | undefined) {
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
   const reload = useCallback(() => setTick((t) => t + 1), [])
+
+  // live: the edit worker's progress, and the finished files it records
+  useEffect(() => {
+    if (!id) return
+    let timer: number | undefined
+    const bump = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(reload, 250)
+    }
+    const channel = supabase
+      .channel(`product-${id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs', filter: `product_id=eq.${id}` }, bump)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products', filter: `id=eq.${id}` }, bump)
+      .subscribe()
+    const onVisible = () => { if (document.visibilityState === 'visible') reload() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      supabase.removeChannel(channel)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.clearTimeout(timer)
+    }
+  }, [id, reload])
 
   useEffect(() => {
     if (!id) return

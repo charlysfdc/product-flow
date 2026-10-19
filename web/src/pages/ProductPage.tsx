@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useProduct } from '../lib/data'
 import { supabase } from '../lib/supabase'
 import { mergeProducts } from '../lib/merge'
@@ -14,6 +14,7 @@ import { ClipList, ORIGINAL_TIP, UploadButton, UploadPanel } from '../components
 import { useUploads } from '../lib/upload'
 import { Options, Sheet } from '../components/Sheet'
 import { DealCard } from '../components/DealCard'
+import { EditSheet, EditStatus, latestEdit } from '../components/Edit'
 import { unlinkDeal } from '../lib/deals'
 import type { Deal } from '../lib/types'
 
@@ -43,15 +44,18 @@ type SheetKind =
   | { kind: 'addPlatform' }
   | { kind: 'merge' }
   | { kind: 'unlink'; deal: Deal }
+  | { kind: 'edit' }
   | null
 
 export function ProductPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const { detail, error, reload } = useProduct(id)
-  const [sheet, setSheet] = useState<SheetKind>(null)
+  // Home's Edit button opens this screen with the Edit sheet up
+  const [sheet, setSheet] = useState<SheetKind>(() => ((location.state as { edit?: boolean } | null)?.edit ? { kind: 'edit' } : null))
   const [busy, setBusy] = useState(false)
-  const [actionError, setActionError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(() => (location.state as { notice?: string } | null)?.notice ?? null)
   const close = useCallback(() => setSheet(null), [])
   const [syncing, setSyncing] = useState(false)
   const [syncNote, setSyncNote] = useState<string | null>(null)
@@ -184,11 +188,18 @@ export function ProductPage() {
   const intake = media.filter((m) => m.kind === 'intake_photo')
   const clips = media.filter((m) => m.kind === 'raw_clip')
   const finished = media.filter((m) => m.kind === 'finished_vertical' || m.kind === 'finished_horizontal')
+  const edit = latestEdit(jobs)
+  const openEdit = () => setSheet({ kind: 'edit' })
+  const editButton = clips.length
+    ? <button className="pri" onClick={openEdit}>Edit</button>
+    : folderLinkFallback()
+  function folderLinkFallback() {
+    return folderUrl
+      ? <a className="pri" href={folderUrl} target="_blank" rel="noreferrer">Open raw clips ↗</a>
+      : <button className="pri" disabled={busy} onClick={makeFolder}>{busy ? 'Making the folder…' : 'Make the Drive folder'}</button>
+  }
 
   // One next step, from the status. Each has one main button and one smaller action.
-  const folderLink = (label: string) => folderUrl
-    ? <a className="pri" href={folderUrl} target="_blank" rel="noreferrer">{label} ↗</a>
-    : <button className="pri" disabled={busy} onClick={makeFolder}>{busy ? 'Making the folder…' : 'Make the Drive folder'}</button>
   const next: { eyebrow: string; title: string; body: string; main: React.ReactNode; subLabel?: string; sub?: React.ReactNode; moreLabel?: string; more?: React.ReactNode } = (() => {
     const deadline = due ? ` ${p.source === 'tiktok_sample' ? 'TikTok Shop deadline' : 'Deadline'}: ${due.toLowerCase()}.` : ''
     switch (p.status) {
@@ -200,11 +211,23 @@ export function ProductPage() {
           main: <><UploadButton product={p} className="pri" /><p className="tip">{ORIGINAL_TIP}</p></>,
           subLabel: 'Clips already in Drive?', sub: <button disabled={syncing} onClick={() => sync(true)}>{syncing ? 'Looking…' : 'Sync from Drive ›'}</button> }
       case 'filmed':
-      case 'editing':
-        return { eyebrow: p.status === 'editing' ? 'Being edited' : 'Next step', title: plannedAmazon ? 'Edit it and upload to Amazon' : 'Edit it',
-          body: `${clips.length ? `${clips.length} raw clip${clips.length === 1 ? ' is' : 's are'}` : 'Raw clips are'} in Drive.${deadline}`, main: folderLink('Open raw clips'),
+        return { eyebrow: 'Next step', title: plannedAmazon ? 'Edit it and upload to Amazon' : 'Edit it',
+          body: edit?.status === 'failed'
+            ? `The last edit didn't finish.${deadline}`
+            : `${clips.length ? `${clips.length} raw clip${clips.length === 1 ? ' is' : 's are'}` : 'Raw clips are'} in Drive. Edit makes a vertical cut, a horizontal review and a thumbnail.${deadline}`,
+          main: edit?.status === 'failed' ? <EditStatus job={edit} onEdit={openEdit} /> : editButton,
           moreLabel: 'More to film?', more: <UploadButton product={p} label="Upload more clips ›" />,
           subLabel: 'Already edited?', sub: <button disabled={busy} onClick={() => setStatus('ready')}>Mark as edited ›</button> }
+      case 'editing': {
+        const review = edit?.status === 'needs_review'
+        return { eyebrow: review ? 'Ready to review' : 'Being edited',
+          title: review ? 'Review the edit' : edit?.status === 'failed' ? 'The edit stopped' : 'Editing',
+          body: review
+            ? `${edit?.question ?? 'A vertical cut, a horizontal review and a thumbnail are in finished.'}${deadline}`
+            : edit ? `You can leave this screen; it carries on in the cloud.${deadline}` : `Raw clips are in Drive.${deadline}`,
+          main: edit ? <EditStatus job={edit} onEdit={openEdit} /> : editButton,
+          subLabel: 'Already edited?', sub: <button disabled={busy} onClick={() => setStatus('ready')}>Mark as edited ›</button> }
+      }
       case 'ready':
         return unposted.length
           ? { eyebrow: 'Next step', title: `Post it on ${unposted.map((c) => PLATFORM_LABEL[c.platform]).join(', ')}`, body: `The finished video is in Drive.${deadline}`,
@@ -391,8 +414,11 @@ export function ProductPage() {
           <ul className="cards">
             {jobs.map((j) => (
               <li key={j.id} className="card">
-                <div className="card-title">{j.type} <span className="muted small">· {j.status.replace('_', ' ')}</span></div>
+                <div className="card-title">{j.type === 'edit' ? 'Edit' : j.type} <span className="muted small">· {j.output?.verdict === 'redo' ? 'redone' : j.output?.verdict === 'approved' ? 'approved' : j.status.replace('_', ' ')} · {fmtShort(j.created_at)}</span></div>
                 {j.question && <div className="card-body">{j.question}</div>}
+                {j.type === 'edit' && j.output?.redo_note && <div className="card-body muted small">Redo note: {j.output.redo_note}</div>}
+                {j.type === 'edit' && j.output?.cost && <div className="muted small">{Math.round(j.output.cost.cpu_seconds / 60 * 10) / 10} min · about ${j.output.cost.total_usd.toFixed(2)}</div>}
+                {j.type === 'edit' && (j.status === 'needs_review' || (j.status === 'done' && j.output?.verdict === 'approved')) && <Link to={`/review/${j.id}`} className="link-btn">{j.status === 'needs_review' ? 'Review' : 'See the edit'}</Link>}
               </li>
             ))}
           </ul>
@@ -474,6 +500,15 @@ export function ProductPage() {
             <button className="link" onClick={close}>Cancel</button>
           </div>
         </Sheet>
+      )}
+
+      {sheet?.kind === 'edit' && (
+        <EditSheet
+          productId={p.id}
+          clips={clips}
+          onClose={close}
+          onStarted={(_job, warning) => { close(); if (warning) setActionError(warning); reload() }}
+        />
       )}
 
       {sheet?.kind === 'merge' && (

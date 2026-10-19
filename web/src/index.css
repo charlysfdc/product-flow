@@ -318,3 +318,31 @@ main.has-bar { padding-bottom: 0; }
 .upbar b { display: block; font-size: 15px; }
 .upbar small { color: var(--primary-muted); font-size: 13px; }
 @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+
+/* ---- Edit: progress in the Next step card, review screen ---- */
+.edit-progress { display: flex; flex-direction: column; gap: 8px; }
+.ep-head { display: flex; justify-content: space-between; gap: 12px; font-size: 17px; }
+.ep-head span { font-variant-numeric: tabular-nums; font-weight: 700; }
+.edit-progress small { color: var(--primary-muted); font-size: 14px; }
+.bar-light { background: color-mix(in srgb, var(--primary-text) 18%, transparent); }
+.bar-light i { background: var(--primary-eyebrow); }
+.link-light { background: none; border: 0; color: var(--primary-text); font-weight: 700; padding: 4px 0; text-align: left; cursor: pointer; }
+.edit-err { color: var(--primary-eyebrow); margin: 0; font-size: 15px; }
+.next a.pri { color: var(--primary); }
+.rv { margin-top: 14px; background: var(--card); border-radius: 24px; padding: 14px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 10px; }
+.rv-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 0 4px; }
+.rv-head .eyebrow { font-size: 12px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); }
+.rv-head span:last-child { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+.rv-v { width: 100%; max-height: 72vh; aspect-ratio: 9 / 16; object-fit: contain; background: #000; border-radius: 16px; display: block; margin: 0 auto; }
+.rv-h { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; border-radius: 16px; display: block; }
+.rv-wait { display: grid; place-items: center; color: #b6b9cc; font-size: 15px; }
+.rv-meta { margin: 0 4px; color: var(--muted); font-size: 14px; }
+.rv-link { margin: 0 4px; font-weight: 700; font-size: 15px; }
+.rv-notes p { margin: 0 0 8px; }
+.rv-notes p:last-child { margin-bottom: 0; }
+.rv-cuts { padding: 0; }
+.rv-cuts li { padding: 10px 16px; list-style: none; }
+.rv-cuts b { font-weight: 600; display: block; line-height: 1.25; }
+.rv-cuts small { color: var(--muted); font-size: 13px; }
+.rv-actions { display: grid; grid-template-columns: 1.6fr 1fr; gap: 8px; }
+.rv-actions .primary, .rv-actions .secondary { width: 100%; }

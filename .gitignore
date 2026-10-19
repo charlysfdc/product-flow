@@ -7,3 +7,4 @@ seed/.venv/
 __pycache__/
 .DS_Store
 *.log
+worker/.venv/

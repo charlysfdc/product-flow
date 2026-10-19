@@ -63,6 +63,8 @@ export interface Media {
   uploaded_at: string
 }
 
+export interface JobProgress { step: string; pct: number; note?: string | null; at?: string }
+
 export interface Job {
   id: string
   product_id: string | null
@@ -70,6 +72,29 @@ export interface Job {
   status: 'queued' | 'running' | 'needs_review' | 'done' | 'failed'
   question: string | null
   created_at: string
+  updated_at?: string
+  input?: { clip_ids?: string[]; note?: string; redo_of?: string } | null
+  output?: EditOutput | null
+  log?: string | null
+  progress?: JobProgress | null   // Home loads only output->progress
+}
+
+/** What the edit worker leaves on a job (worker/pf/pipeline.py, supabase/functions/worker). */
+export interface EditOutput {
+  progress?: JobProgress
+  error?: string
+  plan?: { hook: string; product_label: string; footage: string; concerns: string; keys: string[]; thumbnail: { text: string } }
+  cuts?: Record<'vertical' | 'horizontal', { clip: string; a: number; b: number; why: string; said: string; length: number }[]>
+  clips?: Record<string, string>
+  lengths?: { vertical: number; horizontal: number }
+  media?: Partial<Record<'finished_vertical' | 'finished_horizontal' | 'thumbnail', string>>
+  problems?: string[]
+  skipped?: string[]
+  cost?: { cpu_seconds: number; gpu_seconds: number; modal_usd: number; claude_usd: number; total_usd: number }
+  claude?: { input_tokens: number; output_tokens: number; usd: number; calls: number }
+  timings?: Record<string, number>
+  verdict?: 'approved' | 'redo'
+  redo_note?: string
 }
 
 export type DealMatchStatus = 'waiting' | 'needs_review' | 'matched' | 'ignored'

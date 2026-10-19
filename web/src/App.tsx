@@ -7,6 +7,7 @@ import { DealPage } from './pages/DealPage'
 import { Settings } from './pages/Settings'
 import { WaitingDeals } from './pages/WaitingDeals'
 import { AddProduct } from './pages/AddProduct'
+import { Review } from './pages/Review'
 import { UploadBar } from './components/Clips'
 
 function Gate() {
@@ -23,6 +24,7 @@ function Gate() {
       <Route path="/deals/waiting" element={<WaitingDeals />} />
       <Route path="/settings" element={<Settings />} />
       <Route path="/add" element={<AddProduct />} />
+      <Route path="/review/:jobId" element={<Review />} />
       <Route path="*" element={<Home />} />
     </Routes>
     <UploadBar />

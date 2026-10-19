@@ -1,11 +1,11 @@
 /**
- * Calls to the Supabase edge functions (identify, drive). The phone never holds
+ * Calls to the Supabase edge functions (identify, drive, edit). The phone never holds
  * Google or Anthropic credentials; the functions do the work and answer in JSON.
  */
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 
-export async function callFunction<T>(name: 'identify' | 'drive', body: Record<string, unknown>, timeoutMs?: number): Promise<T> {
+export async function callFunction<T>(name: 'identify' | 'drive' | 'edit', body: Record<string, unknown>, timeoutMs?: number): Promise<T> {
   const { data, error } = await supabase.functions.invoke(name, { body, ...(timeoutMs ? { timeout: timeoutMs } : {}) })
   if (error) {
     let message = error.message
@@ -69,3 +69,22 @@ export const listFolders = (parent = 'root') => callFunction<FolderListing>('dri
 
 export const setProductsFolder = (folderId: string) =>
   callFunction<{ products_folder_id: string; name: string }>('drive', { action: 'set_products_folder', folder_id: folderId })
+
+export interface EditStart { job_id: string; already?: boolean; warning: string | null }
+
+/** Queues an edit of the product's raw clips (all of them unless some are picked) and wakes the worker. */
+export const startEdit = (productId: string, clipIds?: string[], note?: string) =>
+  callFunction<EditStart>('edit', { action: 'start', product_id: productId, clip_ids: clipIds, note })
+
+export const retryEdit = (jobId: string) => callFunction<EditStart>('edit', { action: 'retry', job_id: jobId })
+
+export const approveEdit = (jobId: string) => callFunction<{ ok: boolean }>('edit', { action: 'approve', job_id: jobId })
+
+/** Shelves this cut (finished/Earlier drafts) and starts a new one that adjusts its plan to the note. */
+export const redoEdit = (jobId: string, note: string) => callFunction<EditStart>('edit', { action: 'redo', job_id: jobId, note })
+
+export interface ReviewFile { url: string; drive_file_id: string; filename: string; duration_s: number | null }
+
+/** Links that play the finished files on the phone (valid a few hours). */
+export const reviewFiles = (jobId: string) =>
+  callFunction<{ files: Partial<Record<'finished_vertical' | 'finished_horizontal' | 'thumbnail', ReviewFile>> }>('edit', { action: 'review', job_id: jobId })

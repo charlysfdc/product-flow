@@ -1,0 +1,51 @@
+# Deploys the Modal edit worker (worker/) whenever it changes on main, then tells Supabase where it is.
+# Repository secrets: MODAL_TOKEN_ID, MODAL_TOKEN_SECRET (a Modal API token), WORKER_SECRET (shared
+# between Supabase and Modal; this workflow copies it into both), SUPABASE_ACCESS_TOKEN (already used
+# by deploy-functions.yml). Nothing is pasted into Modal by hand.
+name: Deploy edit worker
+on:
+  push:
+    branches: [main]
+    paths: ['worker/**', '.github/workflows/deploy-worker.yml']
+  workflow_dispatch:
+concurrency:
+  group: modal-worker
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: cjtiiufrtmwdqgikpcxi
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the secrets are set
+        run: |
+          missing=""
+          for s in MODAL_TOKEN_ID MODAL_TOKEN_SECRET WORKER_SECRET SUPABASE_ACCESS_TOKEN; do
+            [ -z "${!s}" ] && missing="$missing $s"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Add these repository secrets (see worker/README.md):$missing"
+            exit 1
+          fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install modal==1.6.2
+      # WORKER_SECRET into Modal (the only secret the worker holds)
+      - run: modal secret create product-flow-worker WORKER_SECRET="$WORKER_SECRET" --force > /dev/null
+      - run: modal deploy app.py
+        working-directory: worker
+      - name: Find the endpoint URL
+        id: url
+        run: echo "url=$(python -c "import modal; print(modal.Function.from_name('product-flow', 'start').get_web_url())")" >> "$GITHUB_OUTPUT"
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      # The edit function calls the worker at MODAL_EDIT_URL with WORKER_SECRET; the worker calls back with it.
+      - run: supabase secrets set --project-ref "$PROJECT_REF" MODAL_EDIT_URL="${{ steps.url.outputs.url }}" WORKER_SECRET="$WORKER_SECRET" > /dev/null
+      - run: echo "Worker live at ${{ steps.url.outputs.url }}"

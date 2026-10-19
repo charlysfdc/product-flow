@@ -1,4 +1,4 @@
-# Deploys the Supabase edge functions (identify, drive) whenever they change on main.
+# Deploys the Supabase edge functions (identify, drive, edit, worker, media) whenever they change on main.
 # Needs one repository secret: SUPABASE_ACCESS_TOKEN (a Supabase personal access token).
 # The functions' own secrets (ANTHROPIC_API_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
 # live in Supabase > Edge Functions > Secrets, never in this repo.
@@ -31,3 +31,12 @@ jobs:
       # The functions check the caller's sign-in themselves (allowed_emails), so the gateway's JWT check is off.
       - run: supabase functions deploy identify --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
       - run: supabase functions deploy drive --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+      # Phase 3: edit (phone), worker (Modal only, checks WORKER_SECRET), media (signed links for the review screen)
+      - run: supabase functions deploy edit --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+      - run: supabase functions deploy worker --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+      - run: supabase functions deploy media --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+      - name: Share WORKER_SECRET with the functions
+        env:
+          WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
+        run: |
+          if [ -n "$WORKER_SECRET" ]; then supabase secrets set --project-ref "$PROJECT_REF" WORKER_SECRET="$WORKER_SECRET" > /dev/null; fi

@@ -139,9 +139,18 @@ class ModalIO:
         raise RuntimeError(f"Could not download {clip['filename']} from Drive.")
 
     def transcribe(self, wavs: dict[str, bytes], hint: str = "") -> dict:
-        r = Transcriber().transcribe.remote(wavs, hint)
-        self.gpu_seconds += r["seconds"]
-        return r["words"]
+        # a GPU that can't be had right now, or a dropped connection to it, is retried rather than failing the edit
+        for attempt in range(1, 4):
+            try:
+                r = Transcriber().transcribe.remote(wavs, hint)
+                self.gpu_seconds += r["seconds"]
+                return r["words"]
+            except Exception as e:
+                if attempt == 3:
+                    raise RuntimeError(f"Transcription failed three times: {e}") from e
+                self.log(f"Transcription attempt {attempt} failed ({e.__class__.__name__}: {e}); trying again.")
+                self.progress("Transcribing what is said", 30, f"trying again ({attempt + 1} of 3)")
+                time.sleep(10 * attempt)
 
     def claude(self):
         import anthropic

@@ -50,6 +50,15 @@ whisper_image = (
 
 # ---------------------------------------------------------------- transcription (GPU)
 
+# condition_on_previous_text=False: a window without punctuation (it happens on long clips) must not teach the
+# next window to drop it too; the prompt shows the style and the product's own words.
+WHISPER_OPTIONS = dict(language="en", word_timestamps=True, vad_filter=True, beam_size=5, condition_on_previous_text=False)
+
+
+def prompt(hint: str) -> str:
+    return (f"A product review of the {hint}. " if hint else "A product review. ") + "Hi guys! So, this is what I think of it: I love it."
+
+
 @app.cls(image=whisper_image, gpu="T4", timeout=1200, scaledown_window=60)
 class Transcriber:
     @modal.enter()
@@ -58,7 +67,7 @@ class Transcriber:
         self.model = WhisperModel(WHISPER_MODEL, device="cuda", compute_type="float16")
 
     @modal.method()
-    def transcribe(self, wavs: dict[str, bytes]) -> dict:
+    def transcribe(self, wavs: dict[str, bytes], hint: str = "") -> dict:
         import io
         import wave
 
@@ -68,7 +77,7 @@ class Transcriber:
         for cid, data in wavs.items():
             with wave.open(io.BytesIO(data)) as w:
                 audio = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
-            segs, _ = self.model.transcribe(audio, language="en", word_timestamps=True, vad_filter=True, beam_size=5)
+            segs, _ = self.model.transcribe(audio, **WHISPER_OPTIONS, initial_prompt=prompt(hint), hotwords=hint or None)
             out[cid] = [{"w": w.word.strip(), "s": round(w.start, 2), "e": round(w.end, 2)} for s in segs for w in s.words]
         return {"words": out, "seconds": round(time.time() - t0, 1)}
 
@@ -129,8 +138,8 @@ class ModalIO:
                 self.log(f"Download of {clip['filename']} interrupted ({e}); resuming.")
         raise RuntimeError(f"Could not download {clip['filename']} from Drive.")
 
-    def transcribe(self, wavs: dict[str, bytes]) -> dict:
-        r = Transcriber().transcribe.remote(wavs)
+    def transcribe(self, wavs: dict[str, bytes], hint: str = "") -> dict:
+        r = Transcriber().transcribe.remote(wavs, hint)
         self.gpu_seconds += r["seconds"]
         return r["words"]
 

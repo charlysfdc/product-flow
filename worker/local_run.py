@@ -28,7 +28,7 @@ class LocalIO:
     def download(self, clip, dest):
         return clip["local_path"]   # read in place from the Drive mount
 
-    def transcribe(self, wavs):
+    def transcribe(self, wavs, hint=""):
         cache = self.out / "_words.json"
         if cache.exists():
             return json.loads(cache.read_text())
@@ -38,7 +38,8 @@ class LocalIO:
             self._whisper = WhisperModel("small", device="cpu", compute_type="int8")
         out = {}
         for cid, data in wavs.items():
-            segs, _ = self._whisper.transcribe(wav_array(data), language="en", word_timestamps=True, vad_filter=True)
+            segs, _ = self._whisper.transcribe(wav_array(data), language="en", word_timestamps=True, vad_filter=True, condition_on_previous_text=False,
+                                               initial_prompt=f"A product review of the {hint}. Hi guys! So, this is what I think of it: I love it.")
             out[cid] = [{"w": w.word.strip(), "s": round(w.start, 2), "e": round(w.end, 2)} for s in segs for w in s.words]
             print(cid, len(out[cid]), "words", flush=True)
         cache.write_text(json.dumps(out))

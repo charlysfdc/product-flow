@@ -21,7 +21,7 @@ HOOK_S = 2.6
 
 class IO(Protocol):
     def download(self, clip: dict, dest: Path) -> str: ...
-    def transcribe(self, wavs: dict[str, bytes]) -> dict[str, list[dict]]: ...
+    def transcribe(self, wavs: dict[str, bytes], hint: str = "") -> dict[str, list[dict]]: ...
     def claude(self): ...
     def upload(self, path: str, name: str, mime: str) -> dict: ...
     def progress(self, step: str, pct: int, note: str = "") -> None: ...
@@ -71,6 +71,29 @@ def sheet_frames(c: planner.Clip, work: Path) -> list[tuple[float, bytes]]:
         return list(ex.map(grab, times))
 
 
+def face_centre(c: planner.Clip, t: float, work: Path) -> float | None:
+    """Where across the frame (0-1) the person is at time t: the biggest face, or the middle of two that fit
+    in one 9:16 window. None when no face is found (the moment is then fitted over a blur instead)."""
+    from PIL import Image
+    out = work / f"face_{c.id}_{t:.1f}.jpg"
+    try:
+        ffx.frame(c.path, t, str(out), c.probe.hdr, width=960)
+        im = Image.open(out)
+    except Exception:
+        return None
+    boxes = sorted(thumb.faces(im), key=lambda b: -b[2] * b[3])
+    if not boxes:
+        return None
+    W = im.width
+    window = im.height * 9 / 16
+    x, _, w, _ = boxes[0]
+    left, right = x, x + w
+    for bx, _, bw, _ in boxes[1:3]:   # keep a second face in the frame when both fit
+        if max(right, bx + bw) - min(left, bx) <= window * 0.9:
+            left, right = min(left, bx), max(right, bx + bw)
+    return round(((left + right) / 2) / W, 4)
+
+
 def pieces_for(which: str, resolved: list[dict], clips: dict[str, planner.Clip], fixed: dict[str, list[dict]],
                plan: dict, keys: set[str], work: Path, size: tuple[int, int]) -> list[Piece]:
     W, H = size
@@ -84,21 +107,24 @@ def pieces_for(which: str, resolved: list[dict], clips: dict[str, planner.Clip],
         portrait = c.probe.portrait != (seg["rotate"] in ("left", "right"))
         for k, (a, b) in enumerate(seg["spans"]):
             p = Piece(src=c.path, probe=c.probe, a=a, b=b, rotate=seg["rotate"])
+            if vertical and not portrait and seg["rotate"] == "none":
+                p.cx = face_centre(c, (a + b) / 2, work)
+            full = portrait or p.cx is not None   # the frame is filled: text sits as on upright footage
             tag = f"{which[0]}{n:02d}_{k:02d}"
             if vertical or plan.get("horizontal_captions", True):
                 for j, (ws, cs, ce) in enumerate(chunks(fixed[c.id], keys, a, b, 0.0)):
                     if vertical:
-                        p.overlays.append(text_overlay(ws, work / f"{tag}_c{j:02d}.png", W, H, 84, 0.72 if portrait else 0.78, cs, ce, 920))
+                        p.overlays.append(text_overlay(ws, work / f"{tag}_c{j:02d}.png", W, H, 84, 0.72 if full else 0.78, cs, ce, 920))
                     else:
                         p.overlays.append(text_overlay(ws, work / f"{tag}_c{j:02d}.png", W, H, 60, 0.88, cs, ce, 1500))
             if seg.get("label"):
-                y = (0.085 if portrait else 0.29) if vertical else 0.08
+                y = (0.085 if full else 0.29) if vertical else 0.08
                 p.overlays.append(text_overlay([(seg["label"].upper(), True)], work / f"{tag}_l.png", W, H, 62 if vertical else 48, y, 0, p.dur))
             if vertical and t_out == 0.0 and plan.get("hook"):
                 p.overlays.append(text_overlay(words_of(plan["hook"], keys), work / "hook.png", W, H, 96, 0.17, 0, min(HOOK_S, p.dur), 940))
             if vertical and n == last_moment and plan.get("product_label"):
                 p.overlays.append(text_overlay(words_of(plan["product_label"], keys | {norm(w) for w in plan["product_label"].split()}),
-                                               work / f"{tag}_name.png", W, H, 80, 0.30 if portrait else 0.22, 0, p.dur, 900))
+                                               work / f"{tag}_name.png", W, H, 80, 0.30 if full else 0.22, 0, p.dur, 900))
             if not vertical and t_out == 0.0 and plan.get("product_label"):
                 p.overlays.append(text_overlay(words_of(plan["product_label"], set()), work / "h_name.png", W, H, 76, 0.12, 0, min(3.5, p.dur), 1600))
             out.append(p)
@@ -146,7 +172,9 @@ def run(ctx: dict, io: IO, work: Path) -> dict:
 
     # 3. words
     io.progress("Transcribing what is said", 30, f"{sum(c.probe.duration for c in clips) / 60:.1f} min of footage")
-    words = io.transcribe(wavs) if wavs else {}
+    brand = product.get("brand") or ""
+    hint = product["name"] if brand.lower() in product["name"].lower() else f"{brand} {product['name']}".strip()
+    words = io.transcribe(wavs, hint) if wavs else {}
     for c in clips:
         c.words = words.get(c.id, [])
     timer.mark("transcribe")

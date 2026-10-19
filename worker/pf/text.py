@@ -47,6 +47,8 @@ def apply_fixes(words: list[dict], fixes: dict[str, str]) -> list[dict]:
             i += n
             continue
         w = dict(words[i], w=fix_word(words[i]["w"], single))
+        if re.fullmatch(r"i('(m|ve|ll|d))?[.,!?]?", w["w"]):   # speech recognition sometimes writes "i'm"
+            w["w"] = "I" + w["w"][1:]
         if w["w"]:
             out.append(w)
         i += 1

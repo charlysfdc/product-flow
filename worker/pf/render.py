@@ -31,6 +31,7 @@ class Piece:
     b: float
     rotate: str = "none"
     overlays: list[Overlay] = field(default_factory=list)
+    cx: float | None = None   # landscape in 9:16: crop a full-height window centred here (0-1 across), else fit over blur
 
     @property
     def dur(self) -> float:
@@ -43,6 +44,10 @@ def _video_chain(p: Piece, W: int, H: int) -> str:
     # short side to 1080 first (4K HEVC decode is the slow part; everything after works on 1080p)
     pre = "scale='if(gt(iw,ih),-2,1080)':'if(gt(iw,ih),1080,-2)'," + (HDR + "," if pr.hdr else "") + ROTATE.get(p.rotate, "")
     vertical = H > W
+    if vertical and not portrait_src and p.cx is not None:
+        # reframe on the person: a full-height 9:16 window around their face, like a hand edit would
+        return (f"[0:v]{pre}fps={FPS},setsar=1,crop=ih*9/16:ih:'max(0,min(iw-ih*9/16,{p.cx:.4f}*iw-ih*9/32))':0,"
+                f"scale={W}:{H}:flags=lanczos,tpad=stop_mode=clone:stop_duration=1[v0]")
     z = LANDSCAPE_ZOOM if vertical and not portrait_src else 1.0
     fw, fh = int(W * z) // 2 * 2, int(H * z) // 2 * 2
     bw, bh = W // 4, H // 4

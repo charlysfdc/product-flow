@@ -17,6 +17,7 @@ from .text import apply_fixes, chunks, norm, words_of
 V = (1080, 1920)
 HZ = (1920, 1080)
 HOOK_S = 2.6
+SPEAKERS = {"mom", "daughter", "charly", "zanje"}
 
 
 class IO(Protocol):
@@ -117,7 +118,7 @@ def pieces_for(which: str, resolved: list[dict], clips: dict[str, planner.Clip],
                         p.overlays.append(text_overlay(ws, work / f"{tag}_c{j:02d}.png", W, H, 84, 0.72 if full else 0.78, cs, ce, 920))
                     else:
                         p.overlays.append(text_overlay(ws, work / f"{tag}_c{j:02d}.png", W, H, 60, 0.88, cs, ce, 1500))
-            if seg.get("label"):
+            if seg.get("label", "").strip().lower() in SPEAKERS:   # who is talking, never the product name
                 y = (0.085 if full else 0.29) if vertical else 0.08
                 p.overlays.append(text_overlay([(seg["label"].upper(), True)], work / f"{tag}_l.png", W, H, 62 if vertical else 48, y, 0, p.dur))
             if vertical and t_out == 0.0 and plan.get("hook"):
@@ -157,6 +158,9 @@ def run(ctx: dict, io: IO, work: Path) -> dict:
     kept, dropped = dedupe(raw, probes)
     for d in dropped:
         io.log(f"Skipped a duplicate: {d}")
+    # c1, c2, ... with no gaps, so the planner doesn't think clips are missing
+    probes = {f"c{i + 1}": probes[c["id"]] for i, c in enumerate(kept)}
+    kept = [dict(c, id=f"c{i + 1}") for i, c in enumerate(kept)]
     clips = [planner.Clip(id=c["id"], filename=c["filename"], path=c["path"], probe=probes[c["id"]], words=[], shot_on=c.get("shot_on")) for c in kept]
     (work / "frames").mkdir(exist_ok=True)
     (work / "audio").mkdir(exist_ok=True)
@@ -181,6 +185,7 @@ def run(ctx: dict, io: IO, work: Path) -> dict:
 
     # 4. the plan
     io.progress("Claude is planning the cut", 45)
+    product = {**product, "duplicates_left_out": len(dropped)} if dropped else product
     plan, resolved, usage = planner.make_plan(io.claude(), product, clips, ctx.get("note"), ctx.get("previous_plan"), log=io.log)
     by_id = {c.id: c for c in clips}
     # last line of defence for the TikTok rule: a vertical moment that still says Amazon is dropped

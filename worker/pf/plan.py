@@ -163,6 +163,9 @@ def build_request(product: dict, clips: list[Clip], note: str | None, previous: 
     facts = {k: product.get(k) for k in ("name", "brand", "variant", "source", "notes") if product.get(k)}
     if product.get("platforms"):
         facts["planned platforms"] = ", ".join(product["platforms"])
+    if product.get("duplicates_left_out"):
+        facts["clips"] = (f"{len(clips)} clip(s) below; {product['duplicates_left_out']} duplicate copies of the same takes "
+                          "(lower quality) were left out on purpose")
     content.append({"type": "text", "text": "Product:\n" + json.dumps(facts, indent=1, ensure_ascii=False)})
     for c in clips:
         if c.sheet:

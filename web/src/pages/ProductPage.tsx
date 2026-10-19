@@ -190,7 +190,7 @@ export function ProductPage() {
   const finished = media.filter((m) => m.kind === 'finished_vertical' || m.kind === 'finished_horizontal')
   const edit = latestEdit(jobs)
   const openEdit = () => setSheet({ kind: 'edit' })
-  const editButton = clips.length
+  const editButton = clips.length || p.drive_folder_id
     ? <button className="pri" onClick={openEdit}>Edit</button>
     : folderLinkFallback()
   function folderLinkFallback() {

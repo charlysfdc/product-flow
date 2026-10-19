@@ -6,7 +6,7 @@
 //   { action: 'review', job_id }                         signed links that play the finished files on the phone
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.118.0'
 import { HttpError, serve } from '../_shared/http.ts'
-import { driveToken, ensureFolder, moveFile } from '../_shared/google.ts'
+import { DRIVE, FOLDER, driveToken, ensureFolder, gd, moveFile } from '../_shared/google.ts'
 import { signedMediaUrl, workerSecret } from '../_shared/worker.ts'
 
 const ACTIVE = ['queued', 'running']
@@ -37,6 +37,36 @@ async function wake(db: SupabaseClient, jobId: string): Promise<string | null> {
   return problem
 }
 
+/** Records the videos in the product's raw folder that the app doesn't know yet (same rows as drive 'sync'). */
+async function recordRaw(db: SupabaseClient, productId: string, folderId: string): Promise<number> {
+  const { token } = await driveToken(db)
+  const q = (s: string) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+  const find = await gd<{ files: { id: string }[] }>(token, `${DRIVE}/files?q=${encodeURIComponent(`name = 'raw' and mimeType = '${FOLDER}' and '${q(folderId)}' in parents and trashed = false`)}&fields=files(id)&supportsAllDrives=true&includeItemsFromAllDrives=true`)
+  const raw = find.files[0]?.id
+  if (!raw) return 0
+  const list = await gd<{ files: { id: string; name: string; mimeType?: string; size?: string; createdTime?: string; videoMediaMetadata?: { width?: number; height?: number; durationMillis?: string } }[] }>(token,
+    `${DRIVE}/files?q=${encodeURIComponent(`'${q(raw)}' in parents and trashed = false and mimeType != '${FOLDER}'`)}&fields=files(id,name,mimeType,size,createdTime,videoMediaMetadata)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true`)
+  const { data: known } = await db.from('media').select('drive_file_id').eq('product_id', productId)
+  const have = new Set((known ?? []).map((m) => m.drive_file_id))
+  let added = 0
+  for (const f of list.files) {
+    if (have.has(f.id) || !((f.mimeType ?? '').startsWith('video/') || /\.(mov|mp4|m4v)$/i.test(f.name))) continue
+    const v = f.videoMediaMetadata
+    const row: Record<string, unknown> = {
+      product_id: productId, kind: 'raw_clip', drive_file_id: f.id, filename: f.name, uploaded_at: f.createdTime,
+      width: v?.width ?? null, height: v?.height ?? null, duration_s: v?.durationMillis ? Math.round(Number(v.durationMillis) / 100) / 10 : null,
+      size_bytes: f.size ? Number(f.size) : null,
+    }
+    let ins = await db.from('media').insert(row)
+    if (ins.error && /size_bytes/.test(ins.error.message)) {
+      delete row.size_bytes
+      ins = await db.from('media').insert(row)
+    }
+    if (!ins.error) added++
+  }
+  return added
+}
+
 async function loadJob(db: SupabaseClient, id: unknown) {
   const { data } = await db.from('jobs').select('*').eq('id', String(id ?? '')).eq('type', 'edit').maybeSingle()
   if (!data) throw new HttpError(404, 'That edit was not found.')
@@ -47,8 +77,10 @@ async function start(db: SupabaseClient, userId: string, productId: string, clip
   const { data: p } = await db.from('products').select('id,name,status,drive_folder_id').eq('id', productId).maybeSingle()
   if (!p) throw new HttpError(404, 'That product was not found.')
   if (!p.drive_folder_id) throw new HttpError(409, 'The product has no Drive folder yet.')
-  const { count } = await db.from('media').select('id', { count: 'exact', head: true }).eq('product_id', p.id).eq('kind', 'raw_clip')
-  if (!count) throw new HttpError(409, 'There are no raw clips to edit. Upload clips or tap Sync from Drive first.')
+  let { count } = await db.from('media').select('id', { count: 'exact', head: true }).eq('product_id', p.id).eq('kind', 'raw_clip')
+  // clips put in Drive's raw folder before the app knew about them (the seeded products): record them now
+  if (!count) count = await recordRaw(db, p.id, p.drive_folder_id)
+  if (!count) throw new HttpError(409, 'There are no videos in the raw folder in Drive. Upload clips first.')
   const { data: busy } = await db.from('jobs').select('id').eq('product_id', p.id).eq('type', 'edit').in('status', ACTIVE).limit(1)
   if (busy?.length) return { job_id: busy[0].id, already: true, warning: null }
   const input: Record<string, unknown> = {}

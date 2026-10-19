@@ -78,7 +78,7 @@ export function Review() {
   const v = files?.finished_vertical, h = files?.finished_horizontal, t = files?.thumbnail
 
   return (
-    <main className="has-bar">
+    <main>
       <div className="pn">
         <Link to={`/product/${product.id}`} className="bk" aria-label="Back to the product">‹</Link>
         <Thumb src={product.product_image_url} name={product.name} />
@@ -89,6 +89,13 @@ export function Review() {
       </div>
 
       {error && <p className="error">{error}</p>}
+
+      {reviewing && (
+        <div className="rv-decide">
+          <button className="primary" disabled={busy || !files} onClick={approve}>{busy ? 'Saving…' : 'Approve'}</button>
+          <button className="secondary" disabled={busy} onClick={() => setRedo(true)}>Redo with a note</button>
+        </div>
+      )}
 
       <section className="rv">
         <div className="rv-head"><span className="eyebrow">Vertical · TikTok Shop, Reels</span><span>{fmtDuration(out.lengths?.vertical)}</span></div>
@@ -138,9 +145,9 @@ export function Review() {
       )}
 
       {reviewing && (
-        <div className="arrived rv-actions">
+        <div className="rv-decide rv-end">
           <button className="primary" disabled={busy || !files} onClick={approve}>{busy ? 'Saving…' : 'Approve'}</button>
-          <button className="secondary" disabled={busy} onClick={() => setRedo(true)}>Redo…</button>
+          <button className="secondary" disabled={busy} onClick={() => setRedo(true)}>Redo with a note</button>
         </div>
       )}
 

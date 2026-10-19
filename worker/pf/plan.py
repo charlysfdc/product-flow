@@ -50,7 +50,9 @@ least 1 second.
 Charly and Zanje sometimes film the same take with two phones at once, one upright and one sideways; their transcripts then match with a time offset. Pick, moment by moment, the angle that shows the person \
 talking and the product best; you may switch angles between moments. A landscape clip in the vertical cut is \
 shown slightly zoomed over a blurred copy of itself, which works when the subject is near the centre; a face \
-and the product in hand usually beat an overhead shot of a table.
+and the product in hand usually beat an overhead shot of a table. A vertical cut whose picture barely changes \
+(one static shot under all the talking) cannot be posted; when the upright clip is static, use the landscape \
+angle of the person instead.
 
 The contact sheets show frames from each clip with their time in seconds, as they will appear. If a clip is \
 filmed sideways (people or text lying on their side), set rotate on its moments ("left" turns it 90 degrees \

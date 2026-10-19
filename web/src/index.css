@@ -344,5 +344,6 @@ main.has-bar { padding-bottom: 0; }
 .rv-cuts li { padding: 10px 16px; list-style: none; }
 .rv-cuts b { font-weight: 600; display: block; line-height: 1.25; }
 .rv-cuts small { color: var(--muted); font-size: 13px; }
-.rv-actions { display: grid; grid-template-columns: 1.6fr 1fr; gap: 8px; }
-.rv-actions .primary, .rv-actions .secondary { width: 100%; }
+.rv-decide { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 2px 0 4px; }
+.rv-decide .primary, .rv-decide .secondary { width: 100%; padding: 14px 10px; font-size: 16px; }
+.rv-end { margin-top: 18px; }

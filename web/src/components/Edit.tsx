@@ -49,7 +49,8 @@ export function EditSheet({ productId, clips, onClose, onStarted }: {
         A vertical cut (30–37 s, for TikTok Shop and Reels), a horizontal review for Amazon (1–2 min) and a thumbnail,
         made from your real audio and put in the finished folder. It takes a few minutes; you can leave this screen.
       </p>
-      <ul className="options">
+      {clips.length === 0 && <p className="card">Every video in the product’s raw folder in Drive will be used.</p>}
+      {clips.length > 0 && <ul className="options">
         {clips.map((c) => (
           <li key={c.id}>
             <button className={'option' + (picked.has(c.id) ? ' option-on' : '')} onClick={() => toggle(c.id)}>
@@ -59,15 +60,15 @@ export function EditSheet({ productId, clips, onClose, onStarted }: {
             </button>
           </li>
         ))}
-      </ul>
+      </ul>}
       <form className="form" onSubmit={(e) => { e.preventDefault(); go() }}>
         <label>
           Anything to know? <span className="muted">(optional)</span>
           <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Start on the reveal. Zanje's take is the better one." />
         </label>
         {error && <p className="error">{error}</p>}
-        <button className="primary" type="submit" disabled={busy || picked.size === 0}>
-          {busy ? 'Starting…' : `Edit ${picked.size} clip${picked.size === 1 ? '' : 's'}${total ? ` · ${fmtDuration(total)}` : ''}`}
+        <button className="primary" type="submit" disabled={busy || (clips.length > 0 && picked.size === 0)}>
+          {busy ? 'Starting…' : clips.length === 0 ? 'Edit all clips' : `Edit ${picked.size} clip${picked.size === 1 ? '' : 's'}${total ? ` · ${fmtDuration(total)}` : ''}`}
         </button>
       </form>
     </Sheet>

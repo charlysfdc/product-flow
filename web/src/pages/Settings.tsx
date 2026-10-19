@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import { importDeals, type ImportSummary } from '../lib/deals'
+import { detectExport, importViews, type ViewsSummary } from '../lib/views'
 import { driveStatus, listFolders, setProductsFolder, type DriveStatus, type FolderListing } from '../lib/functions'
 import { Sheet } from '../components/Sheet'
 import { PhoneSheet } from '../components/Clips'
@@ -22,6 +23,7 @@ export function Settings() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const [summary, setSummary] = useState<ImportSummary | null>(null)
+  const [views, setViews] = useState<ViewsSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState<string | null>(null)
 
@@ -30,9 +32,13 @@ export function Settings() {
     setBusy(true)
     setError(null)
     setSummary(null)
+    setViews(null)
     try {
       const text = await file.text()
-      setSummary(await importDeals(supabase, text, setProgress))
+      const kind = detectExport(text)
+      if (kind === 'videos') setViews(await importViews(supabase, text, setProgress))
+      else if (kind === 'deals') setSummary(await importDeals(supabase, text, setProgress))
+      else throw new Error('This file is not a ViralVue export: expected the Amazon brand deals (Deal ID column) or the Amazon videos (video_id, views_count columns).')
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -98,17 +104,32 @@ export function Settings() {
       {picking && <FolderPicker onClose={() => setPicking(false)} onPicked={() => { setPicking(false); setTick((t) => t + 1) }} />}
 
       <section>
-        <h2>Brand deals</h2>
+        <h2>ViralVue</h2>
         <div className="card">
           <div className="card-title">Import ViralVue export</div>
           <p className="muted small">
-            In ViralVue export the Amazon brand deals as CSV, then pick that file here (from Files on the iPhone or from the Mac).
-            Deals you imported before are updated, not duplicated; nothing you set by hand is overwritten.
+            Either export works; the app tells them apart. <b>Amazon brand deals</b> (CSV): deals are updated, not duplicated, and ticks ViralVue already shows clear their reminders.
+            <b> Amazon videos</b> (CSV): updates the views on every Amazon post. Pick the file from Files on the iPhone or from the Mac; nothing you set by hand is overwritten.
           </p>
           <input ref={fileRef} type="file" accept=".csv,text/csv,text/plain" style={{ display: 'none' }} onChange={(e) => onFile(e.target.files?.[0])} />
           <button className="primary" disabled={busy} onClick={() => fileRef.current?.click()}>{busy ? 'Importing…' : 'Choose CSV file'}</button>
           {progress && <p className="muted small">{progress}</p>}
           {error && <p className="error">{error}</p>}
+          {views && (
+            <div className="summary">
+              <p><b>{views.total}</b> Amazon videos, <b>{views.views.toLocaleString()}</b> views in all.</p>
+              <p className="muted small">
+                {views.byId + views.byTitle + views.byAsin} posts updated ({views.byId} by video id, {views.byTitle} by title, {views.byAsin} by ASIN)
+                {views.created ? `, ${views.created} videos recorded that the app didn’t know` : ''}{views.done ? `, ${views.done} products now Done` : ''}.
+              </p>
+              {views.unmatched.length > 0 && (
+                <details><summary>{views.unmatched.length} videos matched no product</summary><ul>{views.unmatched.map((t, i) => <li key={i} className="small">{t}</li>)}</ul></details>
+              )}
+              {views.errors.length > 0 && (
+                <details><summary className="error">{views.errors.length} rows failed</summary><ul>{views.errors.map((e, i) => <li key={i} className="small">{e}</li>)}</ul></details>
+              )}
+            </div>
+          )}
           {summary && (
             <div className="summary">
               <p><b>{summary.total}</b> deals in the file: <b>{summary.created}</b> new, <b>{summary.updated}</b> updated, <b>{summary.needsReview.length}</b> need your answer.</p>
@@ -117,6 +138,9 @@ export function Settings() {
                 {summary.waitingHidden > 0 ? ` (+${summary.waitingHidden} went quiet)` : ''}, {summary.closed} declined, {summary.postsCreated} Amazon posts recorded.
                 {summary.replyRate.messaged > 0 && ` Reply rate: ${summary.replyRate.received} of ${summary.replyRate.messaged} messaged brands sent a product.`}
               </p>
+              {(summary.viralvue.cleared > 0 || summary.viralvue.message > 0) && (
+                <p className="muted small">ViralVue: {summary.viralvue.cleared} reminder{summary.viralvue.cleared === 1 ? '' : 's'} cleared by this export{summary.viralvue.message ? `; ${summary.viralvue.message} published deal${summary.viralvue.message === 1 ? '' : 's'} with no brand message` : ''}.</p>
+              )}
               {summary.needsReview.length > 0 && <p><Link to="/">Answer them on Home</Link></p>}
               {summary.errors.length > 0 && (
                 <details><summary className="error">{summary.errors.length} rows failed</summary><ul>{summary.errors.map((e, i) => <li key={i} className="small">{e}</li>)}</ul></details>

@@ -2,13 +2,15 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useSnapshot } from '../lib/data'
 import { supabase } from '../lib/supabase'
-import type { Deal, Job, Listing, Platform, Post, Product, ProductStatus } from '../lib/types'
+import type { Deal, Job, Listing, Platform, Post, Product, ProductStatus, ViralVueReminder } from '../lib/types'
 import { suggestProducts } from '../lib/deals'
 import { PLATFORM_LABEL, PLATFORM_ORDER } from '../lib/types'
 import { ProductRow, Thumb, daysUntil, deadlineText } from '../components/ProductRow'
 import { Section } from '../components/Section'
 import { IconCameraPlus, IconGear } from '../components/Icons'
 import { UploadButton } from '../components/Clips'
+import { ReminderRow } from '../components/ViralVue'
+import { publishRows } from '../lib/publish'
 
 /** Deal cards shown in "today" before the rest go to the Answer row. */
 const ANSWER_CARDS = 2
@@ -27,6 +29,7 @@ type View =
       edit: Product[]
       ready: { key: string; label: string; items: Product[] }[]
       readyCount: number
+      vv: ViralVueReminder[]
       waiting: number
       quiet: number
       counts: { total: number; done: number }
@@ -39,9 +42,7 @@ function byDeadlineThenName(a: Product, b: Product) {
 
 /** Platforms a product is planned for and not yet posted on. */
 function unposted(p: Product, listings: Listing[], posts: Post[]): Platform[] {
-  const postedOn = new Set(posts.filter((po) => po.product_id === p.id && po.status === 'posted').map((po) => po.platform))
-  const planned = new Set(listings.filter((l) => l.product_id === p.id && l.availability !== 'not_listed').map((l) => l.platform))
-  return PLATFORM_ORDER.filter((pl) => planned.has(pl) && !postedOn.has(pl))
+  return publishRows(p, listings, posts).filter((r) => r.state === 'open').map((r) => r.platform)
 }
 
 const STEP: Record<ProductStatus, { verb: string; next: ProductStatus | null; button: string | null }> = {
@@ -66,7 +67,7 @@ const preview = (items: { name: string }[]) => {
 }
 
 export function Home() {
-  const { data, error } = useSnapshot()
+  const { data, error, reload } = useSnapshot()
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
@@ -74,7 +75,7 @@ export function Home() {
 
   const view = useMemo((): View | null => {
     if (!data) return null
-    const { products, listings, posts, jobs, deals, waiting, quiet } = data
+    const { products, listings, posts, jobs, deals, waiting, quiet, reminders } = data
     const byId = new Map(products.map((p) => [p.id, p]))
 
     const q = query.trim().toLowerCase()
@@ -105,7 +106,10 @@ export function Home() {
       .filter((x): x is { job: Job; product: Product } => Boolean(x.product))
 
     // Post: one entry per platform the product is planned for and not yet posted on.
+    // Due soon first (TikTok Shop deadlines within 7 days, also on the cards above), then one group per platform.
     const readyGroups = new Map<string, Product[]>()
+    const dueReady = due.filter((p) => p.status === 'ready')
+    if (dueReady.length) readyGroups.set('due', dueReady)
     const readyProducts = rest.filter((p) => p.status === 'ready')
     for (const p of readyProducts) {
       const plats = unposted(p, listings, posts)
@@ -114,9 +118,9 @@ export function Home() {
         readyGroups.get(k)!.push(p)
       }
     }
-    const ready = [...PLATFORM_ORDER, 'none']
+    const ready = ['due', ...PLATFORM_ORDER, 'none']
       .filter((k) => readyGroups.has(k))
-      .map((k) => ({ key: k, label: k === 'none' ? 'No platform yet' : PLATFORM_LABEL[k as Platform], items: readyGroups.get(k)! }))
+      .map((k) => ({ key: k, label: k === 'due' ? 'Due soon' : k === 'none' ? 'No platform yet' : PLATFORM_LABEL[k as Platform], items: readyGroups.get(k)! }))
 
     return {
       kind: 'lists',
@@ -127,7 +131,8 @@ export function Home() {
       film: rest.filter((p) => p.status === 'received' || p.status === 'expected'),
       edit: rest.filter((p) => p.status === 'filmed' || p.status === 'editing'),
       ready,
-      readyCount: readyProducts.length,
+      readyCount: readyProducts.length + dueReady.length,
+      vv: reminders,
       waiting,
       quiet,
       counts: { total: products.length, done: products.filter((p) => p.status === 'done').length },
@@ -218,7 +223,7 @@ export function Home() {
                       ? <Link className="pri" to={editing.get(p.id)?.status === 'needs_review' ? `/review/${editing.get(p.id)!.id}` : `/product/${p.id}`}>{editLabel(editing.get(p.id))}</Link>
                       : step.button
                       ? <button className="pri" disabled={busy === p.id} onClick={() => advance(p)}>{step.button}</button>
-                      : <Link className="pri" to={`/product/${p.id}`}>{p.status === 'ready' ? 'Mark posted' : 'Open'}</Link>}
+                      : <Link className="pri" to={p.status === 'ready' ? `/publish/${p.id}` : `/product/${p.id}`}>{p.status === 'ready' ? 'Post it' : 'Open'}</Link>}
                     {step.button || !p.drive_folder_id
                       ? <Link to={`/product/${p.id}`}>Open</Link>
                       : <a href={`https://drive.google.com/drive/folders/${p.drive_folder_id}`} target="_blank" rel="noreferrer">Open Drive</a>}
@@ -265,10 +270,22 @@ export function Home() {
               {() => view.ready.map((g) => (
                 <div key={g.key}>
                   <h3>{g.label}</h3>
-                  <ul className="list">{g.items.map((p) => <ProductRow key={p.id} product={p} />)}</ul>
+                  <ul className="list">{g.items.map((p) => <ProductRow key={p.id} product={p} to={`/publish/${p.id}`} detail={g.key === 'due' ? unposted(p, data!.listings, data!.posts).map((pl) => PLATFORM_LABEL[pl]).join(', ') : null} />)}</ul>
                 </div>
               ))}
             </Section>
+
+            {view.vv.length > 0 && (
+              <Section id="viralvue" title="To update in ViralVue" sub="Copy the ASIN, paste it in ViralVue’s search, tick it" count={view.vv.length} preview={6} defaultOpen>
+                {(limit) => (
+                  <ul className="list">
+                    {view.vv.slice(0, limit).map((r) => (
+                      <ReminderRow key={r.id} r={r} productName={data?.products.find((p) => p.id === r.deal?.product_id)?.name ?? null} onDone={reload} />
+                    ))}
+                  </ul>
+                )}
+              </Section>
+            )}
 
             {(view.askRest.length > 0 || view.jobs.length > 0) && (
               <Section id="answer" title="Answer" sub="More deals to match" count={view.askRest.length + view.jobs.length} preview={8}>

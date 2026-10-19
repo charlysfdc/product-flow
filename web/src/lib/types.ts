@@ -17,6 +17,7 @@ export interface Product {
   drive_folder_id: string | null
   drive_folder_name: string | null
   extra_drive_folders?: { id: string | null; name: string | null }[]   // migration 0004
+  post_copy?: PostCopy | null                                          // migration 0007
   product_image_url: string | null
   received_at: string | null
   notes: string | null
@@ -35,16 +36,42 @@ export interface Listing {
   checked_at: string | null
 }
 
+export type PostStatus = 'planned' | 'posted' | 'skipped'   // skipped: migration 0007
+
 export interface Post {
   id: string
   product_id: string
+  media_id?: string | null
   platform: Platform
-  status: 'planned' | 'posted'
+  status: PostStatus
   external_id: string | null
   title: string | null
   url: string | null
   posted_at: string | null
   views: number | null
+  views_checked_at?: string | null
+}
+
+/** Text to paste when posting (publish function 'copy'; editable). */
+export interface PostCopy {
+  amazon_title: string
+  amazon_description: string
+  tiktok_caption: string
+  job_id?: string | null
+  generated_at?: string
+  edited_at?: string
+}
+
+export type ViralVueTask = 'received' | 'published' | 'message'
+
+/** A tick to do by hand in ViralVue (migration 0007). */
+export interface ViralVueReminder {
+  id: string
+  deal_id: string
+  kind: ViralVueTask
+  created_at: string
+  done_at: string | null
+  deal?: Pick<Deal, 'id' | 'asin' | 'brand' | 'title' | 'image_url' | 'product_id'> | null
 }
 
 export interface Media {

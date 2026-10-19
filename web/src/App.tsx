@@ -8,6 +8,7 @@ import { Settings } from './pages/Settings'
 import { WaitingDeals } from './pages/WaitingDeals'
 import { AddProduct } from './pages/AddProduct'
 import { Review } from './pages/Review'
+import { Publish } from './pages/Publish'
 import { UploadBar } from './components/Clips'
 
 function Gate() {
@@ -25,6 +26,7 @@ function Gate() {
       <Route path="/settings" element={<Settings />} />
       <Route path="/add" element={<AddProduct />} />
       <Route path="/review/:jobId" element={<Review />} />
+      <Route path="/publish/:id" element={<Publish />} />
       <Route path="*" element={<Home />} />
     </Routes>
     <UploadBar />

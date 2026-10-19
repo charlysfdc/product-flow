@@ -16,6 +16,8 @@ import { Options, Sheet } from '../components/Sheet'
 import { DealCard } from '../components/DealCard'
 import { EditSheet, EditStatus, latestEdit } from '../components/Edit'
 import { unlinkDeal } from '../lib/deals'
+import { markPosted, platformList, publishRows } from '../lib/publish'
+import { ProductReminders } from '../components/ViralVue'
 import type { Deal } from '../lib/types'
 
 function fmtDate(d: string | null) {
@@ -102,17 +104,11 @@ export function ProductPage() {
     }
   }, [reload])
 
+  const checklistRows = useMemo(() => (detail ? publishRows(detail.product, detail.listings, detail.posts) : []), [detail])
   const checklist = useMemo(() => {
-    if (!detail) return []
-    const { listings, posts } = detail
-    const planned = new Set<Platform>()
-    for (const l of listings) if (l.availability !== 'not_listed') planned.add(l.platform)
-    for (const po of posts) planned.add(po.platform)
-    return PLATFORM_ORDER.filter((pl) => planned.has(pl)).map((pl) => {
-      const mine = posts.filter((po) => po.platform === pl)
-      return { platform: pl, posts: mine, posted: mine.some((po) => po.status === 'posted') }
-    })
-  }, [detail])
+    return checklistRows
+      .map((r) => ({ platform: r.platform, posts: r.posts, posted: r.state !== 'open', skipped: r.state === 'skipped' }))
+  }, [checklistRows])
 
   if (error) return <main><Link to="/" className="back">‹ Home</Link><p className="error">{error}</p></main>
   if (!detail) return <main><Link to="/" className="back">‹ Home</Link><p className="muted">Loading…</p></main>
@@ -140,25 +136,11 @@ export function ProductPage() {
       close()
     })
 
-  /** After a post is saved: Done when every planned platform has a posted post. */
-  const maybeDone = async () => {
-    const { data } = await supabase.from('posts').select('platform,status').eq('product_id', p.id)
-    const planned = new Set<Platform>(listings.filter((l) => l.availability !== 'not_listed').map((l) => l.platform))
-    for (const po of data ?? []) planned.add(po.platform as Platform)
-    const postedOn = new Set((data ?? []).filter((po) => po.status === 'posted').map((po) => po.platform))
-    if (planned.size > 0 && [...planned].every((pl) => postedOn.has(pl)) && p.status !== 'done') {
-      await supabase.from('products').update({ status: 'done' }).eq('id', p.id)
-    }
-  }
-
   const savePost = (platform: Platform, url: string, date: string, existing?: Post) =>
     run('Saving post', async () => {
-      const row = { product_id: p.id, platform, status: 'posted' as const, url: url || null, posted_at: date || null }
-      const { error } = existing
-        ? await supabase.from('posts').update(row).eq('id', existing.id)
-        : await supabase.from('posts').insert(row)
-      if (error) throw error
-      await maybeDone()
+      // same path as the Publish screen: Amazon posts also add the ViralVue "Video published" tick
+      const row = checklistRows.find((r) => r.platform === platform) ?? { platform, state: 'open' as const, posts: [], mine: null, views: 0 }
+      await markPosted(supabase, p, [{ ...row, mine: existing ?? row.mine }], { url, date })
       close()
     })
 
@@ -230,14 +212,14 @@ export function ProductPage() {
       }
       case 'ready':
         return unposted.length
-          ? { eyebrow: 'Next step', title: `Post it on ${unposted.map((c) => PLATFORM_LABEL[c.platform]).join(', ')}`, body: `The finished video is in Drive.${deadline}`,
-              main: <button className="pri" onClick={() => setSheet({ kind: 'post', platform: unposted[0].platform })}>Mark {PLATFORM_LABEL[unposted[0].platform]} as posted</button>,
+          ? { eyebrow: 'Next step', title: `Post it on ${platformList(unposted.map((c) => c.platform), (pl) => PLATFORM_LABEL[pl])}`, body: `Text to paste, the video and a Posted tick per platform.${deadline}`,
+              main: <Link className="pri" to={`/publish/${p.id}`}>Post it</Link>,
               subLabel: 'Finished video', sub: folderUrl ? <a href={folderUrl} target="_blank" rel="noreferrer" style={{ color: 'inherit', fontWeight: 700 }}>Open in Drive ↗</a> : undefined }
           : { eyebrow: 'Next step', title: 'Pick where to post it', body: 'No platform is planned yet.',
-              main: <button className="pri" onClick={() => setSheet({ kind: 'addPlatform' })}>Add a platform</button> }
+              main: <Link className="pri" to={`/publish/${p.id}`}>Pick platforms</Link> }
       case 'done':
         return { eyebrow: 'All done', title: 'Posted everywhere', body: totalViews > 0 ? `${totalViews.toLocaleString()} Amazon views so far.` : 'Every planned platform has a post.',
-          main: <button className="pri" onClick={() => setSheet({ kind: 'addPlatform' })}>Post somewhere else too</button> }
+          main: <Link className="pri" to={`/publish/${p.id}`}>Post somewhere else too</Link> }
     }
   })()
 
@@ -252,7 +234,7 @@ export function ProductPage() {
       const views = done.reduce((n, po) => n + (po.views ?? 0), 0)
       return {
         key: c.platform, label: `Posted on ${PLATFORM_LABEL[c.platform]}`, ok: c.posted,
-        detail: c.posted ? (views ? `${views.toLocaleString()} views` : null) : 'Not posted yet',
+        detail: c.skipped ? 'Not posting here' : c.posted ? (views ? `${views.toLocaleString()} views` : null) : 'Not posted yet',
         when: c.posted ? fmtShort(done[0]?.posted_at ?? null) : null,
         onTap: () => setSheet({ kind: 'post', platform: c.platform }),
       }
@@ -283,12 +265,15 @@ export function ProductPage() {
         {p.status === 'received' && syncNote && <p>{syncNote}</p>}
       </section>
 
+      <div style={{ marginTop: 14 }}><ProductReminders dealIds={deals.map((d) => d.id)} /></div>
+
       <UploadPanel productId={p.id} />
 
       <div className="chips">
         <button className={`chip chip-btn status-${p.status}`} onClick={() => setSheet({ kind: 'status' })}>{STATUS_LABEL[p.status]} ▾</button>
         <button className={'chip chip-btn' + (p.source === 'unknown' ? ' chip-ask' : '')} onClick={() => setSheet({ kind: 'source' })}>{SOURCE_LABEL[p.source]} ▾</button>
         {due && <span className="chip chip-due">{due}</span>}
+        {totalViews > 0 && <span className="chip">{totalViews.toLocaleString()} views</span>}
         {folderUrl
           ? <a className="chip" href={folderUrl} target="_blank" rel="noreferrer">{p.drive_folder_name ?? 'Drive folder'} ↗</a>
           : <button className="chip chip-btn" disabled={busy} onClick={makeFolder}>Make Drive folder</button>}
@@ -307,6 +292,7 @@ export function ProductPage() {
           </button>
         ))}
         <div className="actions">
+          {(p.status === 'ready' || p.status === 'done') && <Link className="secondary link-btn" style={{ padding: '11px 14px' }} to={`/publish/${p.id}`}>Publish screen</Link>}
           <button className="secondary" onClick={() => setSheet({ kind: 'addPlatform' })}>Add a platform</button>
           {p.status !== 'done' && checklist.length > 0 && (
             <button className="secondary" onClick={() => setStatus('done')} disabled={busy}>

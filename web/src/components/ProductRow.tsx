@@ -26,12 +26,12 @@ export function Thumb({ src, name, className = 'thumb' }: { src: string | null |
   return <span className={className === 'thumb' ? 'thumb-ph' : `thumb-ph ${className}`} aria-hidden>{initials}</span>
 }
 
-export function ProductRow({ product, detail, showStatus }: { product: Product; detail?: string | null; showStatus?: boolean }) {
+export function ProductRow({ product, detail, showStatus, to }: { product: Product; detail?: string | null; showStatus?: boolean; to?: string }) {
   const due = deadlineText(product.deadline)
   const n = daysUntil(product.deadline)
   return (
     <li>
-      <Link to={`/product/${product.id}`} className="row">
+      <Link to={to ?? `/product/${product.id}`} className="row">
         <Thumb src={product.product_image_url} name={product.name} />
         <div className="row-main">
           <div className="row-title">{product.name}</div>

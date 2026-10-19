@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from './supabase'
-import { ACTIVE_DEAL_STATUSES, quietCutoffIso, type Deal, type Job, type Listing, type Media, type Post, type Product } from './types'
+import { ACTIVE_DEAL_STATUSES, quietCutoffIso, type Deal, type Job, type Listing, type Media, type Post, type Product, type ViralVueReminder } from './types'
+import { openReminders } from './viralvue'
 
 export interface Snapshot {
   products: Product[]
@@ -10,6 +11,7 @@ export interface Snapshot {
   deals: Deal[]          // received deals waiting for an answer
   waiting: number        // deals still waiting on the brand (shown)
   quiet: number          // waiting deals that went quiet (hidden)
+  reminders: ViralVueReminder[]   // ticks to do by hand in ViralVue ([] before migration 0007)
 }
 
 /** PostgREST filter for "still waiting": brand is talking, or messaged within 30 days. */
@@ -24,14 +26,15 @@ export function useSnapshot() {
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const [p, l, po, j, d, w, wAll] = await Promise.all([
+    const [p, l, po, j, d, w, wAll, vv] = await Promise.all([
       supabase.from('products').select('*').order('name'),
       supabase.from('listings').select('id,product_id,platform,external_id,url,commission,availability,availability_note,checked_at'),
-      supabase.from('posts').select('id,product_id,platform,status,title,url,posted_at,views'),
+      supabase.from('posts').select('id,product_id,platform,status,external_id,title,url,posted_at,views'),
       supabase.from('jobs').select('id,product_id,type,status,question,created_at,updated_at,progress:output->progress').in('status', ['needs_review', 'queued', 'running']),
       supabase.from('deals').select('*').eq('match_status', 'needs_review').order('deal_created_at', { ascending: false }),
       supabase.from('deals').select('id', { count: 'exact', head: true }).eq('match_status', 'waiting').or(stillWaitingFilter()),
       supabase.from('deals').select('id', { count: 'exact', head: true }).eq('match_status', 'waiting'),
+      openReminders(supabase),
     ])
     // deals may not exist yet (migration 0002 pending): treat as empty
     const err = p.error ?? l.error ?? po.error ?? j.error
@@ -48,6 +51,7 @@ export function useSnapshot() {
       deals: (d.error ? [] : (d.data ?? [])) as Deal[],
       waiting: w.count ?? 0,
       quiet: Math.max(0, (wAll.count ?? 0) - (w.count ?? 0)),
+      reminders: vv,
     })
   }, [])
 
@@ -64,6 +68,7 @@ export function useSnapshot() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, bump)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, bump)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'deals' }, bump)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'viralvue_reminders' }, bump)
       .subscribe()
     const onVisible = () => {
       if (document.visibilityState === 'visible') load()
@@ -106,6 +111,7 @@ export function useProduct(id: string | undefined) {
       .channel(`product-${id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs', filter: `product_id=eq.${id}` }, bump)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products', filter: `id=eq.${id}` }, bump)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'posts', filter: `product_id=eq.${id}` }, bump)
       .subscribe()
     const onVisible = () => { if (document.visibilityState === 'visible') reload() }
     document.addEventListener('visibilitychange', onVisible)

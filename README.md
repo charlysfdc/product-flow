@@ -142,4 +142,4 @@ Screen**. It opens full-screen like an app and stays signed in.
 - 1 Intake: add product by barcode/photo/link, identify job.
 - 2 Film: upload clips from the phone straight into Drive.
 - 3 Edit: cloud worker cuts, captions and thumbnails.
-- 4 Publish: per-platform checklist and Amazon views.
+- **4 Publish**: `/publish/:id` per product: one card per planned platform (Amazon sample → Amazon US + listed CA/UK/DE; TikTok Shop sample → TikTok Shop with its deadline; bought → pick), Claude's title/description/caption to copy, Save video to phone (share sheet), Posted ticks, Done when all are posted or skipped. ViralVue reminders (Received, Video published, Message the brand) on the Product/Publish screens and Home, cleared by hand or by the next deals export. Settings → Import ViralVue export also takes the Amazon videos export (views). Migration `0007_publish.sql`.

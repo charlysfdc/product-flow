@@ -1,4 +1,4 @@
-# Deploys the Supabase edge functions (identify, drive, edit, worker, media) whenever they change on main.
+# Deploys the Supabase edge functions (identify, drive, edit, worker, media, publish) whenever they change on main.
 # Needs one repository secret: SUPABASE_ACCESS_TOKEN (a Supabase personal access token).
 # The functions' own secrets (ANTHROPIC_API_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET)
 # live in Supabase > Edge Functions > Secrets, never in this repo.
@@ -35,6 +35,8 @@ jobs:
       - run: supabase functions deploy edit --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
       - run: supabase functions deploy worker --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
       - run: supabase functions deploy media --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
+      # Phase 4: publish (Claude's post text, signed links to save the finished video on the phone)
+      - run: supabase functions deploy publish --project-ref "$PROJECT_REF" --no-verify-jwt --use-api
       - name: Share WORKER_SECRET with the functions
         env:
           WORKER_SECRET: ${{ secrets.WORKER_SECRET }}

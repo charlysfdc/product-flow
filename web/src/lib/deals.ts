@@ -12,6 +12,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { parseCsv } from './csv'
 import { dealState, type Deal, type LinkAdded, type Product, type ProductSource, type ProductStatus } from './types'
+import { addReminders, closeReminders } from './viralvue'
 
 export interface DealInput {
   platform: 'amazon_us'
@@ -44,6 +45,7 @@ export interface ImportSummary {
   postsCreated: number
   replyRate: { received: number; messaged: number }
   errors: string[]
+  viralvue: { cleared: number; message: number }   // reminders the export ticked off; published deals still to message
 }
 
 const epoch = (v: string | undefined): string | null => {
@@ -234,6 +236,7 @@ export async function substituteDeal(client: SupabaseClient, deal: Deal, arrived
     stamped = true
   }
   await linkDealToProduct(client, deal, arrived, { substituted: true, stamped_received: stamped }, source)
+  if (stamped) await addReminders(client, [deal.id], 'received')
 }
 
 /**
@@ -263,6 +266,8 @@ export async function receiveDeal(client: SupabaseClient, deal: Deal, overrides:
   throwIf('create product', res.error)
   const product = res.data as Product
   await linkDealToProduct(client, deal, product, { created_product: true, stamped_received: stamped })
+  // the app knows it arrived before ViralVue does: remind to tick Received there
+  if (stamped) await addReminders(client, [deal.id], 'received')
   return product
 }
 
@@ -303,7 +308,7 @@ export async function findWaitingDeals(client: SupabaseClient, hint: { asin?: st
 
 // ---- the import -----------------------------------------------------------
 
-type ExistingDeal = Pick<Deal, 'id' | 'external_id' | 'product_id' | 'match_status'>
+type ExistingDeal = Pick<Deal, 'id' | 'external_id' | 'product_id' | 'match_status' | 'received_at'>
 
 /** Import a ViralVue CSV export. Safe to run again with a newer export. */
 export async function importDeals(client: SupabaseClient, csvText: string, onProgress?: (msg: string) => void): Promise<ImportSummary> {
@@ -311,13 +316,13 @@ export async function importDeals(client: SupabaseClient, csvText: string, onPro
   const inputs = parseViralVueDeals(csvText)
   const summary: ImportSummary = {
     total: inputs.length, created: 0, updated: 0, matched: 0, closed: 0, waitingShown: 0, waitingHidden: 0,
-    needsReview: [], productsCreated: [], postsCreated: 0, replyRate: { received: 0, messaged: 0 }, errors: [],
+    needsReview: [], productsCreated: [], postsCreated: 0, replyRate: { received: 0, messaged: 0 }, errors: [], viralvue: { cleared: 0, message: 0 },
   }
   if (!inputs.length) return summary
 
   say('Reading what is already there…')
   const existing = new Map<string, ExistingDeal>()
-  for (const d of await selectAll<ExistingDeal>((a, b) => client.from('deals').select('id,external_id,product_id,match_status').eq('platform', 'amazon_us').range(a, b))) existing.set(d.external_id, d)
+  for (const d of await selectAll<ExistingDeal>((a, b) => client.from('deals').select('id,external_id,product_id,match_status,received_at').eq('platform', 'amazon_us').range(a, b))) existing.set(d.external_id, d)
   const listings = await selectAll<{ product_id: string; external_id: string | null }>((a, b) => client.from('listings').select('product_id,external_id').eq('platform', 'amazon_us').range(a, b))
   const byAsin = new Map<string, string>()
   for (const l of listings) if (l.external_id && !byAsin.has(l.external_id)) byAsin.set(l.external_id, l.product_id)
@@ -349,7 +354,11 @@ export async function importDeals(client: SupabaseClient, csvText: string, onPro
   say(`Saving ${decisions.length} deals…`)
   const saved = new Map<string, Deal>()
   for (let i = 0; i < decisions.length; i += 500) {
-    const rows = decisions.slice(i, i + 500).map((d) => ({ ...d.input, product_id: d.product_id, match_status: d.match_status }))
+    const rows = decisions.slice(i, i + 500).map((d) => ({
+      ...d.input, product_id: d.product_id, match_status: d.match_status,
+      // a box the app recorded as arrived stays arrived while ViralVue isn't ticked yet
+      received_at: d.input.received_at ?? existing.get(d.input.external_id)?.received_at ?? null,
+    }))
     const { data, error } = await client.from('deals').upsert(rows, { onConflict: 'platform,external_id' }).select('*')
     throwIf('save deals', error)
     for (const d of (data ?? []) as Deal[]) saved.set(d.external_id, d)
@@ -412,6 +421,20 @@ export async function importDeals(client: SupabaseClient, csvText: string, onPro
     if (d.match_status === 'needs_review' && !d.autoCreate) summary.needsReview.push({ title: `${d.input.brand ?? ''} · ${d.input.title ?? d.input.asin}`, suggestion: d.suggestion?.name ?? null })
     else if (d.match_status === 'ignored') summary.closed++
     else if (d.match_status === 'waiting') (dealState(d.input) === 'waiting' ? summary.waitingShown++ : summary.waitingHidden++)
+  }
+  // ViralVue reminders: ticks this export shows are done; published deals with no brand message need one
+  say('Checking ViralVue reminders…')
+  try {
+    const idOf = (i: DealInput) => saved.get(i.external_id)?.id
+    const ids = (f: (i: DealInput) => unknown) => inputs.filter(f).map(idOf).filter((x): x is string => Boolean(x))
+    summary.viralvue.cleared += await closeReminders(client, ids((i) => i.received_at), 'received', 'import')
+    summary.viralvue.cleared += await closeReminders(client, ids((i) => i.published_at), 'published', 'import')
+    summary.viralvue.cleared += await closeReminders(client, ids((i) => i.message_sent_at), 'message', 'import')
+    const unmessaged = ids((i) => i.published_at && !i.message_sent_at && !isClosedStatus(i.status_raw))
+    await addReminders(client, unmessaged, 'message')
+    summary.viralvue.message = unmessaged.length
+  } catch (e) {
+    summary.errors.push((e as Error).message)
   }
   summary.replyRate = { received: inputs.filter((i) => i.received_at).length, messaged: inputs.filter((i) => i.message_sent_at).length }
   say('Done.')

@@ -21,6 +21,7 @@ const products = [
   P('p8', 'Castor Oil', { brand: 'Sky Organics', status: 'editing', drive_folder_id: 'x8', deadline: inDays(1) }),
   P('p9', 'Flashforge AD5X', { brand: 'Flashforge', status: 'ready' }),
   P('p10', 'Eufy Robot Vacuum', { brand: 'Eufy', status: 'done' }),
+  P('p12', 'Blood Pressure Monitor', { brand: 'Omron', status: 'ready', drive_folder_id: 'x12', received_at: '2026-10-02' }),
 ]
 const listings = [
   { id: 'l1', product_id: 'p6', platform: 'amazon_us', external_id: null, url: null, commission: null, availability: 'unchecked', availability_note: null, checked_at: null },
@@ -28,6 +29,7 @@ const listings = [
   { id: 'l3', product_id: 'p1', platform: 'tiktok_shop', external_id: null, url: null, commission: '17% (~$5.10)', availability: 'exact', availability_note: 'Yes - Kitsch official', checked_at: '2026-10-17' },
   { id: 'l4', product_id: 'p1', platform: 'amazon_us', external_id: 'B0GJG8N8N7', url: 'https://www.amazon.com/dp/B0GJG8N8N7', commission: null, availability: 'exact', availability_note: null, checked_at: null },
   { id: 'l5', product_id: 'p9', platform: 'tiktok_shop', external_id: null, url: null, commission: null, availability: 'exact', availability_note: null, checked_at: null },
+  ...['amazon_us', 'amazon_ca', 'amazon_uk', 'amazon_de'].map((pl, i) => ({ id: `l12${i}`, product_id: 'p12', platform: pl, external_id: 'B0BPM12345', url: null, commission: null, availability: 'exact', availability_note: null, checked_at: null })),
 ]
 const posts = [
   { id: 'po1', product_id: 'p1', platform: 'amazon_us', status: 'posted', external_id: 'v1', title: 'Curl Hair Cream', url: null, posted_at: '2026-04-30', views: 1509 },
@@ -42,6 +44,11 @@ const deals = [
   deal('d2', 'Plaud', 'PLAUD NotePen AI Voice Recorder Pen', { match_status: 'needs_review', received_at: '2026-10-12T00:00:00Z' }),
   deal('d3', 'NEXTORCH', 'NEXTORCH P82C Rechargeable Flashlight 1600 Lumens', { product_id: 'p6', match_status: 'matched', received_at: '2026-09-26T00:00:00Z' }),
   deal('d4', 'Govee', 'Govee RGBIC Floor Lamp'),
+  deal('d5', 'Omron', 'Omron Platinum Blood Pressure Monitor, Upper Arm', { asin: 'B0BPM12345', product_id: 'p12', match_status: 'matched', received_at: '2026-10-02T00:00:00Z', message_sent_at: null }),
+]
+const reminders: Record<string, unknown>[] = [
+  { id: 'r1', deal_id: 'd3', kind: 'received', created_at: '2026-10-18T10:00:00Z', done_at: null },
+  { id: 'r2', deal_id: 'd5', kind: 'message', created_at: '2026-10-18T10:00:00Z', done_at: null },
 ]
 const media = [
   { id: 'm1', product_id: 'p6', kind: 'raw_clip', drive_file_id: 'fx1', filename: 'IMG_4412.MOV', duration_s: 48.2, width: 1080, height: 1920, shot_on: 'Charly’s iPhone', uploaded_by: 'u', size_bytes: 412_000_000, codec: 'hevc', uploaded_at: '2026-10-11T10:00:00Z' },
@@ -71,7 +78,29 @@ media.push(
   { id: 'm7', product_id: 'p7', kind: 'raw_clip', drive_file_id: 'f7', filename: 'IMG_5001.MOV', duration_s: 95, width: 1080, height: 1920, shot_on: 'Zanje’s iPhone', uploaded_by: 'u', size_bytes: 800_000_000, codec: 'hevc', uploaded_at: now },
   { id: 'm8', product_id: 'p8', kind: 'raw_clip', drive_file_id: 'f8', filename: 'castor oil.MOV', duration_s: 179.7, width: 1080, height: 1920, shot_on: null, uploaded_by: null, size_bytes: 296_000_000, codec: null, uploaded_at: now },
 )
-const tables: Record<string, Record<string, unknown>[]> = { products, listings, posts, deals, jobs, media, profiles: [] }
+jobs.push({ id: 'j3', product_id: 'p12', type: 'edit', status: 'done', question: null, created_at: now, updated_at: now, input: {}, log: null,
+  output: { verdict: 'approved', media: { finished_vertical: 'mv12', finished_horizontal: 'mh12' }, plan: { hook: 'Is my blood pressure really that high?', product_label: 'Upper arm monitor', footage: '', concerns: '', keys: [], thumbnail: { text: 'Honest BP check' } },
+    cuts: { vertical: [{ clip: 'c1', a: 0, b: 5, why: '', said: 'I finally checked my blood pressure at home and this thing is so easy.', length: 5 }], horizontal: [] } } })
+media.push(
+  { id: 'mv12', product_id: 'p12', kind: 'finished_vertical', drive_file_id: 'dv12', filename: 'Blood Pressure Monitor - vertical (auto v1).mp4', duration_s: 35.5, width: 1080, height: 1920, shot_on: null, uploaded_by: null, size_bytes: 48_000_000, codec: null, uploaded_at: now },
+  { id: 'mh12', product_id: 'p12', kind: 'finished_horizontal', drive_file_id: 'dh12', filename: 'Blood Pressure Monitor - horizontal (auto v1).mp4', duration_s: 116, width: 1920, height: 1080, shot_on: null, uploaded_by: null, size_bytes: 152_000_000, codec: null, uploaded_at: now },
+)
+const tables: Record<string, Record<string, unknown>[]> = { products, listings, posts, deals, jobs, media, viralvue_reminders: reminders, profiles: [] }
+
+/** Phase 4: Claude's text and the finished file (a CORS + Range server on :8789 with v.mp4, h.mp4, 20 MB and 30 MB). */
+function demoPublish(body: Record<string, unknown>): Response {
+  if (body.action === 'copy') {
+    const copy = { amazon_title: 'Blood Pressure Monitor - So Easy at Home!', amazon_description: 'An upper-arm monitor I use at home. The video shows the cuff going on, one button to start and the reading on the big screen. Good for anyone who wants a quick daily check; the cuff is snug on larger arms.', tiktok_caption: 'Checking my blood pressure at home is this easy now 🙌\n\n#bloodpressure #healthcheck #tiktokshopfinds #homehealth', job_id: 'j3', generated_at: new Date().toISOString() }
+    const p = products.find((x) => x.id === body.product_id) as Record<string, unknown> | undefined
+    if (p) p.post_copy = copy
+    return json({ copy, cached: false, saved: true })
+  }
+  if (body.action === 'file') {
+    const v = body.kind === 'finished_vertical'
+    return json({ media_id: v ? 'mv12' : 'mh12', drive_file_id: v ? 'dv12' : 'dh12', filename: v ? 'demo vertical.mp4' : 'demo horizontal.mp4', size: v ? 20_000_000 : 30_000_000, mime: 'video/mp4', duration_s: 35, url: `http://localhost:8789/${v ? 'v' : 'h'}.mp4` })
+  }
+  return json({ error: 'unknown' }, { status: 400 })
+}
 
 function demoEdit(body: Record<string, unknown>): Response {
   const media8 = 'http://localhost:8788'
@@ -156,6 +185,7 @@ export const demoFetch: typeof fetch = async (input, init) => {
     const body = JSON.parse(String(init?.body ?? '{}'))
     if (url.pathname.endsWith('/identify')) return json({ name: 'Nextorch P91 Flashlight', brand: 'NEXTORCH', variant: 'Black', upc: body.upc ?? null, asin: null, title: 'NEXTORCH P91 Tactical Flashlight', image_url: null, url: body.url ?? null, platform: null, tiktok_product_id: null, confidence: 'high', note: null })
     if (url.pathname.endsWith('/edit')) return demoEdit(body)
+    if (url.pathname.endsWith('/publish')) return demoPublish(body)
     if (body.action === 'status') return json({ connected: false, email: null, products_folder_id: null })
     if (body.action?.endsWith('upload') || body.action === 'upload_status' || body.action === 'sync') return demoDrive(body)
     return json({ folder_id: 'demo', folder_name: 'demo', created: true, media_id: 'm', drive_file_id: 'f' })
@@ -164,7 +194,8 @@ export const demoFetch: typeof fetch = async (input, init) => {
   if (!m) return json({})
   const table = tables[m[1]] ?? []
   if (method === 'GET' || method === 'HEAD') {
-    const rows = applyFilters(table, url.searchParams)
+    let rows = applyFilters(table, url.searchParams)
+    if (m[1] === 'viralvue_reminders') rows = rows.map((r) => ({ ...r, deal: deals.find((d) => d.id === r.deal_id) ?? null }))
     if (method === 'HEAD') return new Response(null, { status: 200, headers: { 'content-range': `0-0/${m[1] === 'deals' ? (url.searchParams.get('or') ? 201 : 4271) : rows.length}` } })
     if ((headers.get('Accept') ?? '').includes('vnd.pgrst.object')) return rows[0] ? json(rows[0]) : json({ message: 'not found' }, { status: 406 })
     return json(rows)
@@ -175,9 +206,14 @@ export const demoFetch: typeof fetch = async (input, init) => {
     return json([])
   }
   if (method === 'POST') {
-    const row = { id: `new${Date.now()}`, ...JSON.parse(String(init?.body ?? '{}')) }
-    table.push(row)
-    return (headers.get('Accept') ?? '').includes('vnd.pgrst.object') ? json(row) : json([row])
+    const body = JSON.parse(String(init?.body ?? '{}'))
+    const added = (Array.isArray(body) ? body : [body]).map((b, i) => ({ id: `new${Date.now()}${i}`, created_at: new Date().toISOString(), ...b }))
+    for (const row of added) {
+      // upsert on (deal_id, kind), ignoring duplicates, as the reminders use it
+      if (m[1] === 'viralvue_reminders' && table.some((r) => r.deal_id === row.deal_id && r.kind === row.kind)) continue
+      table.push(row)
+    }
+    return (headers.get('Accept') ?? '').includes('vnd.pgrst.object') ? json(added[0]) : json(added)
   }
   return json([])
 }

@@ -1,11 +1,11 @@
 /**
- * Calls to the Supabase edge functions (identify, drive, edit). The phone never holds
+ * Calls to the Supabase edge functions (identify, drive, edit, publish). The phone never holds
  * Google or Anthropic credentials; the functions do the work and answer in JSON.
  */
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 
-export async function callFunction<T>(name: 'identify' | 'drive' | 'edit', body: Record<string, unknown>, timeoutMs?: number): Promise<T> {
+export async function callFunction<T>(name: 'identify' | 'drive' | 'edit' | 'publish', body: Record<string, unknown>, timeoutMs?: number): Promise<T> {
   const { data, error } = await supabase.functions.invoke(name, { body, ...(timeoutMs ? { timeout: timeoutMs } : {}) })
   if (error) {
     let message = error.message
@@ -88,3 +88,13 @@ export interface ReviewFile { url: string; drive_file_id: string; filename: stri
 /** Links that play the finished files on the phone (valid a few hours). */
 export const reviewFiles = (jobId: string) =>
   callFunction<{ files: Partial<Record<'finished_vertical' | 'finished_horizontal' | 'thumbnail', ReviewFile>> }>('edit', { action: 'review', job_id: jobId })
+
+/** Claude's Amazon title + description and TikTok caption (saved on the product; `force` writes them again). */
+export const writePostCopy = (productId: string, force = false) =>
+  callFunction<{ copy: import('./types').PostCopy; cached: boolean; saved?: boolean }>('publish', { action: 'copy', product_id: productId, force }, 90_000)
+
+export interface FinishedFile { media_id: string; drive_file_id: string; filename: string; size: number; mime: string; duration_s: number | null; url: string }
+
+/** A signed link (valid 6 hours) to download the finished vertical or horizontal from Drive. */
+export const finishedFile = (productId: string, kind: 'finished_vertical' | 'finished_horizontal') =>
+  callFunction<FinishedFile>('publish', { action: 'file', product_id: productId, kind })

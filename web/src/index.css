@@ -543,3 +543,6 @@ a.add-btn { color: #fff; }
 .same-strong { border-color: var(--done); }
 .same-confirm { padding: 0 16px 6px; }
 .same-confirm p { margin: 0 0 6px; }
+.fix-more { margin-top: 16px; }
+.fix-more summary { cursor: pointer; font-weight: 700; padding: 8px 4px; display: flex; align-items: center; gap: 8px; }
+.fix-more p { margin: 0 4px 8px; }

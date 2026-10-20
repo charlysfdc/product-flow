@@ -169,6 +169,24 @@ export function FixList() {
             <ul className="list">{g.items.map((p) => <ProductRow key={p.id} product={p} showStatus />)}</ul>
           </section>
         ))
+      ) : k === 'drive' ? (
+        <>
+          {fix.drive.length === 0 ? <p className="empty">Nothing to fix.</p> : <ul className="list">{fix.drive.map((p) => <ProductRow key={p.id} product={p} showStatus />)}</ul>}
+          {fix.drivePosted.length > 0 && (
+            <details className="fix-more">
+              <summary>Posted, footage only on Amazon <span className="count">{fix.drivePosted.length}</span></summary>
+              <p className="muted small">Posted before the library was in Drive; there is nothing to save.</p>
+              <ul className="list">{fix.drivePosted.map((p) => <ProductRow key={p.id} product={p} showStatus />)}</ul>
+            </details>
+          )}
+          {fix.driveLater.length > 0 && (
+            <details className="fix-more">
+              <summary>Folder made on first upload <span className="count">{fix.driveLater.length}</span></summary>
+              <p className="muted small">Not filmed yet; the folder is created when the first clip is uploaded.</p>
+              <ul className="list">{fix.driveLater.map((p) => <ProductRow key={p.id} product={p} showStatus />)}</ul>
+            </details>
+          )}
+        </>
       ) : fix[k].length === 0 ? <p className="empty">Nothing to fix.</p> : k === 'details' ? (
         <ul className="list">
           {fix.details.map((p, i) => {

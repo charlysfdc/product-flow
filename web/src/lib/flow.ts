@@ -139,12 +139,12 @@ export const FIX_LABEL: Record<FixKind, { title: string; help: string }> = {
   details: { title: 'Missing details', help: 'No picture or no Amazon listing. Find on Amazon fills the picture, brand, price and ASIN; after each one it moves on to the next.' },
   price: { title: 'Missing a price', help: 'Tap one and add what it costs (US $) on its Product screen.' },
   source: { title: 'Missing a source', help: 'Where it came from decides where it must be posted; set it on the Product screen.' },
-  drive: { title: 'No Drive folder', help: 'Open one and tap Make Drive folder.' },
+  drive: { title: 'No Drive folder', help: 'Filmed, editing or ready products with no Drive folder: open one and tap Make Drive folder.' },
   dupes: { title: 'Possible duplicates', help: 'Products sharing an Amazon ASIN. If two are the same, open one and Merge into the other.' },
 }
 
 /** Products for a fix-up list; duplicates come in groups sharing one ASIN. */
-export function fixups(data: Snapshot): Record<FixKind, Product[]> & { dupeGroups: { asin: string; items: Product[] }[] } {
+export function fixups(data: Snapshot): Record<FixKind, Product[]> & { dupeGroups: { asin: string; items: Product[] }[]; drivePosted: Product[]; driveLater: Product[] } {
   const { products, listings } = data
   const byId = new Map(products.map((p) => [p.id, p]))
   const byAsin = new Map<string, Set<string>>()
@@ -162,7 +162,10 @@ export function fixups(data: Snapshot): Record<FixKind, Product[]> & { dupeGroup
     details: products.filter((p) => !p.product_image_url || !onAmazon.has(p.id)).sort(name),
     price: products.filter((p) => p.price == null).sort(name),
     source: products.filter((p) => p.source === 'unknown').sort(name),
-    drive: products.filter((p) => !p.drive_folder_id).sort(name),
+    // only real problems: filmed/editing/ready; posted ones and not-yet-filmed ones are listed apart
+    drive: products.filter((p) => !p.drive_folder_id && ['filmed', 'editing', 'ready'].includes(p.status)).sort(name),
+    drivePosted: products.filter((p) => !p.drive_folder_id && p.status === 'done').sort(name),
+    driveLater: products.filter((p) => !p.drive_folder_id && (p.status === 'received' || p.status === 'expected')).sort(name),
     dupes: dupeGroups.flatMap((g) => g.items),
     dupeGroups,
   }

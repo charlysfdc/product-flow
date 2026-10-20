@@ -74,8 +74,18 @@ export const setProductsFolder = (folderId: string) =>
 export interface EditStart { job_id: string; already?: boolean; warning: string | null }
 
 /** Queues an edit of the product's raw clips (all of them unless some are picked) and wakes the worker. */
-export const startEdit = (productId: string, clipIds?: string[], note?: string) =>
-  callFunction<EditStart>('edit', { action: 'start', product_id: productId, clip_ids: clipIds, note })
+export const startEdit = (productId: string, clipIds?: string[], note?: string, voiceover?: boolean) =>
+  callFunction<EditStart>('edit', { action: 'start', product_id: productId, clip_ids: clipIds, note, voiceover })
+
+/** No talking found: write a voice-over script, make a captions-and-music cut, or stop. */
+export const answerVoiceover = (jobId: string, choice: 'voice' | 'music' | 'cancel') =>
+  callFunction<EditStart & { ok?: boolean }>('edit', { action: 'voiceover', job_id: jobId, choice })
+
+/** The script lines as Charly left them; each line keeps its shots. */
+export const approveScript = (jobId: string, vertical: string[], horizontal: string[]) =>
+  callFunction<EditStart>('edit', { action: 'approve_script', job_id: jobId, vertical, horizontal })
+
+export const rewriteScript = (jobId: string, note: string) => callFunction<EditStart>('edit', { action: 'rewrite_script', job_id: jobId, note })
 
 export const retryEdit = (jobId: string) => callFunction<EditStart>('edit', { action: 'retry', job_id: jobId })
 

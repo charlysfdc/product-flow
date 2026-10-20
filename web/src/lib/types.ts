@@ -111,7 +111,17 @@ export interface Job {
 }
 
 /** What the edit worker leaves on a job (worker/pf/pipeline.py, supabase/functions/worker). */
+/** A voice-over script line: what Charly's voice says and the shots shown meanwhile (worker/pf/voiceplan.py). */
+export interface ScriptLine { say: string; seconds: number; shots: { clip: string; start: number; rotate: string }[] }
+
 export interface EditOutput {
+  // where the edit stopped: a question (no talking found), a script to read, or a finished cut
+  stage?: 'ask_voiceover' | 'script' | 'cut'
+  speech?: { words: number; spoken_s: number; footage_s: number }
+  vo_plan?: { hook: string; product_label: string; footage: string; concerns: string; vertical: ScriptLine[]; horizontal: ScriptLine[] }
+  words?: { vertical: number; horizontal: number }
+  voiceover?: 'voice' | 'music'
+  elevenlabs?: { voice: string; model: string; characters: number }
   progress?: JobProgress
   error?: string
   plan?: { hook: string; product_label: string; footage: string; concerns: string; keys: string[]; thumbnail: { text: string } }

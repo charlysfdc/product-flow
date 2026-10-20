@@ -28,6 +28,9 @@ class LocalIO:
     def download(self, clip, dest):
         return clip["local_path"]   # read in place from the Drive mount
 
+    def download_music(self, track, dest):
+        return str(Path.home() / "meta-api/music" / track["name"])
+
     def transcribe(self, wavs, hint=""):
         cache = self.out / "_words.json"
         if cache.exists():

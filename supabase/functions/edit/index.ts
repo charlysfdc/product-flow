@@ -6,6 +6,9 @@
 //   { action: 'retry', job_id }                          a failed or stuck job runs again
 //   { action: 'approve', job_id }                        product -> Edited, not posted
 //   { action: 'redo', job_id, note }                     this cut goes to finished/Earlier drafts; a new job adjusts its plan
+//   { action: 'voiceover', job_id, choice }           footage without talking: 'voice' (write a script), 'music' (captions & music), 'cancel'
+//   { action: 'approve_script', job_id, vertical, horizontal }   the (edited) lines are read in Charly's voice and rendered
+//   { action: 'rewrite_script', job_id, note }        Claude writes the script again, adjusting it to the note
 //   { action: 'review', job_id }                         signed links that play the finished files on the phone
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.118.0'
 import { HttpError, serve } from '../_shared/http.ts'
@@ -70,13 +73,22 @@ async function recordRaw(db: SupabaseClient, productId: string, folderId: string
   return added
 }
 
+/** The same job runs again with more input (the voice-over steps), keeping its id and its place on the phone. */
+async function requeue(db: SupabaseClient, job: Record<string, any>, more: Record<string, unknown>) {
+  await db.from('jobs').update({
+    status: 'queued', finished_at: null, question: null, input: { ...(job.input ?? {}), ...more },
+    output: { progress: { step: 'Waiting for the worker', pct: 0 } },
+  }).eq('id', job.id)
+  return { job_id: job.id, warning: await wake(db, job.id) }
+}
+
 async function loadJob(db: SupabaseClient, id: unknown) {
   const { data } = await db.from('jobs').select('*').eq('id', String(id ?? '')).eq('type', 'edit').maybeSingle()
   if (!data) throw new HttpError(404, 'That edit was not found.')
   return data
 }
 
-async function start(db: SupabaseClient, userId: string, productId: string, clipIds: string[] | undefined, note: string | null, redoOf: string | null, fromStatus?: string) {
+async function start(db: SupabaseClient, userId: string, productId: string, clipIds: string[] | undefined, note: string | null, redoOf: string | null, fromStatus?: string, extra: Record<string, unknown> = {}) {
   const { data: p } = await db.from('products').select('id,name,status,drive_folder_id').eq('id', productId).maybeSingle()
   if (!p) throw new HttpError(404, 'That product was not found.')
   if (!p.drive_folder_id) throw new HttpError(409, 'The product has no Drive folder yet.')
@@ -96,6 +108,7 @@ async function start(db: SupabaseClient, userId: string, productId: string, clip
   if (clipIds?.length) input.clip_ids = clipIds
   if (note) input.note = note
   if (redoOf) input.redo_of = redoOf
+  Object.assign(input, extra)
   const { data: job, error } = await db.from('jobs').insert({
     product_id: p.id, type: 'edit', status: 'queued', input, created_by: userId,
     output: { progress: { step: 'Waiting for the worker', pct: 0 } },
@@ -131,7 +144,41 @@ serve(async (body, { user, db }) => {
     case 'start': {
       const note = body.note ? String(body.note).trim().slice(0, 1000) : null
       const clipIds = Array.isArray(body.clip_ids) ? body.clip_ids.map(String) : undefined
-      return await start(db, user.id, String(body.product_id ?? ''), clipIds, note || null, null)
+      // "Add a voice-over" on the Edit sheet: Claude writes a script first, whatever is said in the clips
+      return await start(db, user.id, String(body.product_id ?? ''), clipIds, note || null, null, undefined, body.voiceover ? { voiceover: 'script' } : {})
+    }
+
+    case 'voiceover': {
+      const job = await loadJob(db, body.job_id)
+      if (job.status !== 'needs_review' || job.output?.stage !== 'ask_voiceover') throw new HttpError(409, 'This edit is not waiting for that answer.')
+      const choice = String(body.choice ?? '')
+      if (choice === 'cancel') {
+        await db.from('jobs').update({ status: 'done', question: null, output: { ...(job.output ?? {}), verdict: 'cancelled', reviewed_by: user.email, reviewed_at: new Date().toISOString() } }).eq('id', job.id)
+        await db.from('products').update({ status: job.input?.from_status === 'ready' ? 'ready' : 'filmed' }).eq('id', job.product_id).eq('status', 'editing')
+        return { ok: true }
+      }
+      if (choice !== 'voice' && choice !== 'music') throw new HttpError(400, 'Pick voice, music or cancel.')
+      return await requeue(db, job, { voiceover: choice === 'voice' ? 'script' : 'music' })
+    }
+
+    case 'approve_script': {
+      const job = await loadJob(db, body.job_id)
+      const plan = job.output?.vo_plan
+      if (job.status !== 'needs_review' || job.output?.stage !== 'script' || !plan) throw new HttpError(409, 'There is no script waiting to be read.')
+      // Charly's edits replace the words of each line; the shots stay as planned
+      const said = (lines: unknown, old: { say: string }[]) => old.map((l, i) => ({ ...l, say: Array.isArray(lines) && typeof lines[i] === 'string' ? String(lines[i]).trim().slice(0, 600) : l.say }))
+        .filter((l) => l.say)
+      const vo_plan = { ...plan, vertical: said(body.vertical, plan.vertical), horizontal: said(body.horizontal, plan.horizontal) }
+      if (!vo_plan.vertical.length || !vo_plan.horizontal.length) throw new HttpError(400, 'Both scripts need at least one line.')
+      return await requeue(db, job, { voiceover: 'render', vo_plan })
+    }
+
+    case 'rewrite_script': {
+      const job = await loadJob(db, body.job_id)
+      if (job.status !== 'needs_review' || job.output?.stage !== 'script') throw new HttpError(409, 'There is no script waiting to be read.')
+      const note = String(body.note ?? '').trim().slice(0, 1000)
+      if (!note) throw new HttpError(400, 'Say what to change in the script.')
+      return await requeue(db, job, { voiceover: 'script', previous_vo_plan: job.output?.vo_plan ?? null, script_note: note })
     }
 
     case 'retry': {
@@ -146,6 +193,7 @@ serve(async (body, { user, db }) => {
     case 'approve': {
       const job = await loadJob(db, body.job_id)
       if (job.status !== 'needs_review') throw new HttpError(409, 'This edit is not waiting for review.')
+      if (job.output?.stage === 'ask_voiceover' || job.output?.stage === 'script') throw new HttpError(409, 'There is no cut to approve yet.')
       await db.from('jobs').update({ status: 'done', question: null, output: { ...(job.output ?? {}), verdict: 'approved', reviewed_by: user.email, reviewed_at: new Date().toISOString() } }).eq('id', job.id)
       // a new cut of a Ready product replaces the old one: earlier finished files go to finished/Earlier drafts
       if (job.input?.from_status === 'ready') {
@@ -172,7 +220,11 @@ serve(async (body, { user, db }) => {
       await shelve(db, job)
       await db.from('jobs').update({ status: 'done', question: null, output: { ...(job.output ?? {}), media: {}, verdict: 'redo', redo_note: note, reviewed_by: user.email, reviewed_at: new Date().toISOString() } }).eq('id', job.id)
       const clipIds = (job.input?.clip_ids as string[] | undefined) ?? undefined
-      return await start(db, user.id, job.product_id, clipIds, note, job.id, job.input?.from_status)
+      // a voiced cut goes back to its script: Claude adjusts it to the note and Charly reads it again
+      const extra = job.output?.voiceover === 'voice'
+        ? { voiceover: 'script', previous_vo_plan: job.output?.vo_plan ?? null, script_note: note }
+        : job.output?.voiceover === 'music' ? { voiceover: 'music' } : {}
+      return await start(db, user.id, job.product_id, clipIds, note, job.id, job.input?.from_status, extra)
     }
 
     case 'review': {

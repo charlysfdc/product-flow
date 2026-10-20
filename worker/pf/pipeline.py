@@ -10,9 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
-from . import ffx, plan as planner, thumb
-from .render import Piece, render, text_overlay
-from .text import apply_fixes, chunks, norm, words_of
+from . import ffx, plan as planner, thumb, voice, voiceplan
+from .render import Overlay, Piece, render, text_overlay
+from .text import apply_fixes, chunks, norm, text_png, words_of
 
 V = (1080, 1920)
 HZ = (1920, 1080)
@@ -22,6 +22,7 @@ SPEAKERS = {"mom", "daughter", "charly", "zanje"}
 
 class IO(Protocol):
     def download(self, clip: dict, dest: Path) -> str: ...
+    def download_music(self, track: dict, dest: Path) -> str: ...
     def transcribe(self, wavs: dict[str, bytes], hint: str = "") -> dict[str, list[dict]]: ...
     def claude(self): ...
     def upload(self, path: str, name: str, mime: str) -> dict: ...
@@ -137,13 +138,21 @@ def safe_name(s: str) -> str:
     return "".join(ch if ch not in '/\\:*?"<>|' else "-" for ch in s).strip()[:90]
 
 
-def run(ctx: dict, io: IO, work: Path) -> dict:
-    """ctx: {job, product, clips, previous_plan, note, version}. Returns the job output (files, plan, timings, usage)."""
-    timer = Timer()
-    product, job = ctx["product"], ctx["job"]
+SILENT_WORDS, SILENT_SHARE = 15, 0.10    # fewer words than this, or speech in less than this share of the footage
+
+
+def is_silent(clips: list[planner.Clip]) -> tuple[bool, dict]:
+    n = sum(len(c.words) for c in clips)
+    spoken = sum(w["e"] - w["s"] for c in clips for w in c.words)
+    total = sum(c.probe.duration for c in clips) or 1.0
+    return n < SILENT_WORDS or spoken / total < SILENT_SHARE, {"words": n, "spoken_s": round(spoken, 1), "footage_s": round(total, 1)}
+
+
+def prepare(ctx: dict, io: IO, work: Path, timer: Timer, transcribe: bool = True) -> tuple[list[planner.Clip], list[str]]:
+    """Steps shared by every kind of edit: the clips from Drive, a look at them, and what is said in them."""
+    product = ctx["product"]
     work.mkdir(parents=True, exist_ok=True)
 
-    # 1. clips from Drive
     io.progress("Getting the clips from Drive", 3, f"{len(ctx['clips'])} clip{'s' if len(ctx['clips']) != 1 else ''}")
     raw = [dict(c, id=f"c{i + 1}") for i, c in enumerate(ctx["clips"])]
     with ThreadPoolExecutor(max_workers=3) as ex:
@@ -152,7 +161,6 @@ def run(ctx: dict, io: IO, work: Path) -> dict:
         c["path"] = p
     timer.mark("download")
 
-    # 2. look at them
     io.progress("Looking at the footage", 20)
     probes = {c["id"]: ffx.probe(c["path"]) for c in raw}
     kept, dropped = dedupe(raw, probes)
@@ -165,23 +173,72 @@ def run(ctx: dict, io: IO, work: Path) -> dict:
     (work / "frames").mkdir(exist_ok=True)
     (work / "audio").mkdir(exist_ok=True)
     wavs = {}
-    for c in clips:
-        if c.probe.has_audio:
-            wav = work / "audio" / f"{c.id}.wav"
-            ffx.extract_audio(c.path, str(wav))
-            wavs[c.id] = wav.read_bytes()
+    if transcribe:
+        for c in clips:
+            if c.probe.has_audio:
+                wav = work / "audio" / f"{c.id}.wav"
+                ffx.extract_audio(c.path, str(wav))
+                wavs[c.id] = wav.read_bytes()
     for c in clips:
         c.sheet = planner.contact_sheet(sheet_frames(c, work / "frames"), c.id)
     timer.mark("look")
 
-    # 3. words
-    io.progress("Transcribing what is said", 30, f"{sum(c.probe.duration for c in clips) / 60:.1f} min of footage")
-    brand = product.get("brand") or ""
-    hint = product["name"] if brand.lower() in product["name"].lower() else f"{brand} {product['name']}".strip()
-    words = io.transcribe(wavs, hint) if wavs else {}
-    for c in clips:
-        c.words = words.get(c.id, [])
-    timer.mark("transcribe")
+    if transcribe:
+        io.progress("Transcribing what is said", 30, f"{sum(c.probe.duration for c in clips) / 60:.1f} min of footage")
+        brand = product.get("brand") or ""
+        hint = product["name"] if brand.lower() in product["name"].lower() else f"{brand} {product['name']}".strip()
+        words = io.transcribe(wavs, hint) if wavs else {}
+        for c in clips:
+            c.words = words.get(c.id, [])
+        timer.mark("transcribe")
+    return clips, dropped
+
+
+def thumbnail(plan: dict, clips: list[planner.Clip], keys: set[str], work: Path, out: str, io: IO) -> None:
+    by_id = {c.id: c for c in clips}
+    t = plan["thumbnail"]
+    tc = by_id.get(t["clip"]) or clips[0]
+    tframe = work / "thumb_frame.jpg"
+    ffx.frame(tc.path, max(0.0, min(float(t["time"]), tc.probe.duration - 0.1)), str(tframe), tc.probe.hdr, width=1920)
+    placed = thumb.make(str(tframe), t["text"], keys, t["text_position"], out)
+    if placed != t["text_position"]:
+        io.log(f"Thumbnail words moved to the {placed} so they don't cover a face.")
+
+
+def claude_cost(usage) -> dict:
+    return {"model": planner.MODEL, "calls": usage.calls, "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens, "cache_read": usage.cache_read, "usd": usage.usd}
+
+
+def upload_all(io: IO, v_out: str, v_len: float, h_out: str, h_len: float, t_out: str) -> dict:
+    io.progress("Saving to Drive (finished)", 92)
+    return {
+        "finished_vertical": {**io.upload(v_out, Path(v_out).name, "video/mp4"), "duration_s": v_len, "width": V[0], "height": V[1]},
+        "finished_horizontal": {**io.upload(h_out, Path(h_out).name, "video/mp4"), "duration_s": h_len, "width": HZ[0], "height": HZ[1]},
+        "thumbnail": {**io.upload(t_out, Path(t_out).name, "image/jpeg"), "width": thumb.W, "height": thumb.H},
+    }
+
+
+def run(ctx: dict, io: IO, work: Path) -> dict:
+    """ctx: {job, product, clips, previous_plan, note, version, voiceover, ...}. Returns the job output.
+
+    voiceover None: Charly's own audio (the original recipe); footage without talking stops at a question.
+    'script': Claude writes a voice-over script and the job stops for Charly to read it.
+    'render': the approved script is read in Charly's cloned voice and both cuts are rendered.
+    'music': on-screen captions over music, no voice."""
+    mode = ctx.get("voiceover")
+    if mode in ("render", "music"):
+        return run_voiced(ctx, io, work, music=mode == "music")
+    if mode == "script":
+        return run_script(ctx, io, work)
+
+    timer = Timer()
+    product = ctx["product"]
+    clips, dropped = prepare(ctx, io, work, timer)
+    silent, speech = is_silent(clips)
+    if silent:
+        io.log(f"Almost nothing is said ({speech['words']} words, {speech['spoken_s']} s of speech in {speech['footage_s']} s).")
+        return {"stage": "ask_voiceover", "speech": speech, "clips": {c.id: c.filename for c in clips}, "skipped": dropped, "timings": timer.marks}
 
     # 4. the plan
     io.progress("Claude is planning the cut", 45)
@@ -201,7 +258,6 @@ def run(ctx: dict, io: IO, work: Path) -> dict:
     # 5-6. render
     stem = safe_name(product["name"])
     v_tag = f"auto v{ctx.get('version', 1)}"
-    files = {}
     io.progress("Rendering the vertical cut", 60, f"{sum(s['length'] for s in vert):.0f} s")
     vp = pieces_for("vertical", vert, by_id, fixed, plan, keys, work / "v", V)
     v_out = str(work / f"{stem} - vertical ({v_tag}).mp4")
@@ -216,24 +272,16 @@ def run(ctx: dict, io: IO, work: Path) -> dict:
 
     # 7. thumbnail
     io.progress("Making the thumbnail", 88)
-    t = plan["thumbnail"]
-    tc = by_id.get(t["clip"]) or clips[0]
-    tframe = work / "thumb_frame.jpg"
-    ffx.frame(tc.path, min(float(t["time"]), tc.probe.duration - 0.1), str(tframe), tc.probe.hdr, width=1920)
     t_out = str(work / f"{stem} - thumbnail ({v_tag}).jpg")
-    placed = thumb.make(str(tframe), t["text"], keys, t["text_position"], t_out)
-    if placed != t["text_position"]:
-        io.log(f"Thumbnail words moved to the {placed} so they don't cover a face.")
+    thumbnail(plan, clips, keys, work, t_out, io)
     timer.mark("thumbnail")
 
     # 8. into finished/
-    io.progress("Saving to Drive (finished)", 92)
-    files["finished_vertical"] = {**io.upload(v_out, Path(v_out).name, "video/mp4"), "duration_s": v_len, "width": V[0], "height": V[1]}
-    files["finished_horizontal"] = {**io.upload(h_out, Path(h_out).name, "video/mp4"), "duration_s": h_len, "width": HZ[0], "height": HZ[1]}
-    files["thumbnail"] = {**io.upload(t_out, Path(t_out).name, "image/jpeg"), "width": thumb.W, "height": thumb.H}
+    files = upload_all(io, v_out, v_len, h_out, h_len, t_out)
     timer.mark("upload")
 
     return {
+        "stage": "cut",
         "plan": plan,
         "cuts": {
             "vertical": [{k: s[k] for k in ("clip", "a", "b", "kind", "why", "said", "length")} for s in vert],
@@ -245,6 +293,157 @@ def run(ctx: dict, io: IO, work: Path) -> dict:
         "files": files,
         "lengths": {"vertical": v_len, "horizontal": h_len},
         "timings": timer.marks,
-        "claude": {"model": planner.MODEL, "calls": usage.calls, "input_tokens": usage.input_tokens,
-                   "output_tokens": usage.output_tokens, "cache_read": usage.cache_read, "usd": usage.usd},
+        "claude": claude_cost(usage),
+    }
+
+
+# ---------------------------------------------------------------- voice-over and captions-and-music cuts
+
+def run_script(ctx: dict, io: IO, work: Path) -> dict:
+    """Claude writes the voice-over (lines + shots); the job then waits for Charly to read and approve it."""
+    timer = Timer()
+    clips, dropped = prepare(ctx, io, work, timer)
+    io.progress("Claude is writing the voice-over", 45)
+    product = {**ctx["product"], "duplicates_left_out": len(dropped)} if dropped else ctx["product"]
+    plan, problems, usage = voiceplan.make_plan(io.claude(), product, clips, ctx.get("script_note") or ctx.get("note"),
+                                                ctx.get("previous_vo_plan"), log=io.log)
+    timer.mark("plan")
+    return {"stage": "script", "vo_plan": plan, "problems": problems, "clips": {c.id: c.filename for c in clips},
+            "skipped": dropped, "timings": timer.marks, "claude": claude_cost(usage),
+            "words": {"vertical": voiceplan.words_in(plan["vertical"]), "horizontal": voiceplan.words_in(plan["horizontal"])}}
+
+
+def spread(overlays: list[tuple[str, float, float]], pieces: list[Piece]) -> None:
+    """Hands overlays timed on the whole cut to the pieces they fall in, on each piece's own clock."""
+    t0 = 0.0
+    for p in pieces:
+        t1 = t0 + p.dur + p.hold
+        for png, s, e in overlays:
+            if e > t0 and s < t1:
+                p.overlays.append(Overlay(png, max(s, t0) - t0, min(e, t1) - t0))
+        t0 = t1
+
+
+def line_pieces(lines: list[dict], spans: list[tuple[float, float]], clips: dict[str, planner.Clip], vertical: bool,
+                work: Path) -> list[tuple[int, Piece]]:
+    """Each line's time shared evenly by its shots; a shot runs from its start on the clip (held on its last frame
+    when the clip ends first)."""
+    out = []
+    for k, (line, (s0, s1)) in enumerate(zip(lines, spans)):
+        shots = [sh for sh in line["shots"] if sh["clip"] in clips] or [{"clip": next(iter(clips)), "start": 0.0, "rotate": "none"}]
+        d = (s1 - s0) / len(shots)
+        for sh in shots:
+            c = clips[sh["clip"]]
+            avail = c.probe.duration - 0.05
+            a = max(0.0, min(float(sh["start"]), avail - d))
+            b = min(avail, a + d)
+            p = Piece(src=c.path, probe=c.probe, a=round(a, 3), b=round(b, 3), rotate=sh.get("rotate", "none"), gain_db=-18.0)
+            p.hold = round(max(0.0, d - (b - a)), 3)
+            portrait = c.probe.portrait != (p.rotate in ("left", "right"))
+            if vertical and not portrait and p.rotate == "none":
+                p.cx = face_centre(c, (a + b) / 2, work)
+            out.append((k, p))
+    return out
+
+
+def run_voiced(ctx: dict, io: IO, work: Path, music: bool) -> dict:
+    """Renders an approved voice-over script (or captions over music) onto the real footage."""
+    timer = Timer()
+    product = ctx["product"]
+    clips, dropped = prepare(ctx, io, work, timer, transcribe=False)
+    by_id = {c.id: c for c in clips}
+    usage = planner.Usage()
+    tracks = ctx.get("music_tracks") or []
+    plan = ctx.get("vo_plan")
+    if not plan:   # captions and music: no script to approve, Claude plans it now
+        io.progress("Claude is planning the captions", 40)
+        plan, problems, usage = voiceplan.make_plan(io.claude(), product, clips, ctx.get("note"), None, music=True,
+                                                    tracks=[t["name"] for t in tracks], log=io.log)
+        timer.mark("plan")
+    keys = {norm(k) for k in plan["keys"]}
+    stem = safe_name(product["name"])
+    v_tag = f"auto v{ctx.get('version', 1)}"
+    chars = 0
+    over, over_db, loop = None, 0.0, False
+    if music:
+        track = next((t for t in tracks if t["name"] == plan.get("music")), tracks[0] if tracks else None)
+        if track:
+            over, over_db, loop = io.download_music(track, work / "music"), -6.0, True
+        else:
+            io.log("No music found in Content Library/Music; the cut keeps only the clips' own sound.")
+
+    lengths, outs = {}, {}
+    for which, size, pct in (("vertical", V, 55), ("horizontal", HZ, 72)):
+        vertical = which == "vertical"
+        lines = [l for l in plan[which] if l["say"].strip()]
+        cw = work / which[0]
+        cw.mkdir(parents=True, exist_ok=True)
+        W, H = size
+        overlays: list[tuple[str, float, float]] = []
+        if music:
+            spans, t = [], 0.0
+            for l in lines:
+                d = max(1.5, float(l["seconds"]))
+                spans.append((t, t + d))
+                t += d
+            for k, (l, (s0, s1)) in enumerate(zip(lines, spans)):
+                png = cw / f"line{k:02d}.png"
+                text_png(words_of(l["say"], keys), str(png), size, 84 if vertical else 64, int(H * (0.72 if vertical else 0.86)), int(W * 0.85))
+                overlays.append((str(png), s0, s1))
+            total = spans[-1][1] if spans else 0.0
+            bed, bed_db = over, over_db
+        else:
+            io.progress(f"Charly's voice reads the {which} script", pct, f"{voiceplan.words_in(lines)} words")
+            voiced = voice.speak(ctx["elevenlabs"]["api_key"], [l["say"] for l in lines], cw / "voice", max_s=36.0 if vertical else 120.0)
+            chars += voiced.characters
+            spans, total = voiced.line_spans, voiced.line_spans[-1][1]
+            for j, (ws, cs, ce) in enumerate(chunks(voiced.words, keys, 0.0, total, 0.0)):
+                png = cw / f"cap{j:03d}.png"
+                if vertical:
+                    text_png(ws, str(png), size, 84, int(H * 0.72), 920)
+                else:
+                    text_png(ws, str(png), size, 60, int(H * 0.88), 1500)
+                overlays.append((str(png), cs, ce))
+            bed, bed_db = voiced.wav, 0.0
+        io.progress(f"Rendering the {which} cut", pct + 8, f"{total:.0f} s")
+        lp = line_pieces(lines, spans, by_id, vertical, cw)
+        pieces = [p for _, p in lp]
+        if vertical and plan.get("hook"):
+            png = cw / "hook.png"
+            text_png(words_of(plan["hook"], keys), str(png), size, 96, int(H * 0.17), 940)
+            overlays.append((str(png), 0.0, HOOK_S))
+        if plan.get("product_label") and lines:
+            png = cw / "name.png"
+            if vertical:   # over the last line
+                text_png(words_of(plan["product_label"], keys | {norm(w) for w in plan["product_label"].split()}), str(png), size, 80, int(H * 0.30), 900)
+                overlays.append((str(png), spans[-1][0], total))
+            else:
+                text_png(words_of(plan["product_label"], set()), str(png), size, 76, int(H * 0.12), 1600)
+                overlays.append((str(png), 0.0, min(3.5, total)))
+        spread(overlays, pieces)
+        out = str(work / f"{stem} - {which} ({v_tag}{', voice-over' if not music else ', music'}).mp4")
+        lengths[which] = render(pieces, out, W, H, cw / "render", over=bed, over_db=bed_db, loop_over=music)
+        outs[which] = out
+        timer.mark(f"render_{which}")
+
+    io.progress("Making the thumbnail", 88)
+    t_out = str(work / f"{stem} - thumbnail ({v_tag}).jpg")
+    thumbnail(plan, clips, keys, work, t_out, io)
+    timer.mark("thumbnail")
+    files = upload_all(io, outs["vertical"], lengths["vertical"], outs["horizontal"], lengths["horizontal"], t_out)
+    timer.mark("upload")
+    return {
+        "stage": "cut",
+        "voiceover": "music" if music else "voice",
+        "vo_plan": plan,
+        "plan": {"hook": plan["hook"], "product_label": plan["product_label"], "footage": plan["footage"],
+                 "concerns": plan["concerns"], "keys": plan["keys"], "thumbnail": plan["thumbnail"]},
+        "clips": {c.id: c.filename for c in clips},
+        "skipped": dropped,
+        "problems": [],
+        "files": files,
+        "lengths": lengths,
+        "timings": timer.marks,
+        "claude": claude_cost(usage),
+        "elevenlabs": {"voice": voice.VOICE_NAME, "model": voice.MODEL, "characters": chars},
     }

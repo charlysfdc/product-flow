@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { approveEdit, redoEdit, reviewFiles, type ReviewFile } from '../lib/functions'
+import { answerVoiceover, approveEdit, redoEdit, reviewFiles, type ReviewFile } from '../lib/functions'
 import { fmtDuration } from '../lib/upload'
 import type { Job, Product } from '../lib/types'
 import { Thumb } from '../components/ProductRow'
@@ -31,8 +31,10 @@ export function Review() {
       if (cancelled) return
       if (je || !j) return setError(je?.message ?? 'That edit was not found.')
       setJob(j as Job)
+      const stage = (j as Job).output?.stage
       const { data: p } = await supabase.from('products').select('*').eq('id', (j as Job).product_id!).single()
       if (!cancelled) setProduct(p as Product)
+      if (stage === 'ask_voiceover' || stage === 'script') return
       try {
         const r = await reviewFiles(jobId)
         if (!cancelled) setFiles(r.files)
@@ -73,6 +75,41 @@ export function Review() {
   if (!job || !product) return <main><Link to="/" className="back">‹ Home</Link><p className="muted">Loading…</p></main>
 
   const out = job.output ?? {}
+  if (out.stage === 'script' && job.status === 'needs_review') return <Navigate to={`/script/${job.id}`} replace />
+  if (out.stage === 'ask_voiceover' && job.status === 'needs_review') {
+    const answer = async (choice: 'voice' | 'music' | 'cancel') => {
+      setBusy(true)
+      setError(null)
+      try {
+        const r = await answerVoiceover(job.id, choice)
+        navigate(`/product/${job.product_id}`, { replace: true, state: r.warning ? { notice: r.warning } : undefined })
+      } catch (e) {
+        setError((e as Error).message)
+        setBusy(false)
+      }
+    }
+    return (
+      <main>
+        <div className="pn">
+          <Link to={`/product/${product.id}`} className="bk" aria-label="Back to the product">‹</Link>
+          <Thumb src={product.product_image_url} name={product.name} />
+          <div style={{ minWidth: 0 }}><h1>No talking found</h1><small>{product.name}</small></div>
+        </div>
+        <section className="next">
+          <span className="eyebrow">Your answer</span>
+          <h2>Create a voice-over?</h2>
+          <p>
+            {out.speech ? `${out.speech.words} word${out.speech.words === 1 ? '' : 's'} in ${fmtDuration(out.speech.footage_s)} of footage, so there is nothing to caption. ` : ''}
+            Claude can write a script in your words for your own voice to read. You read and change the script first; nothing is spoken until you approve it.
+          </p>
+          <button className="pri" disabled={busy} onClick={() => answer('voice')}>{busy ? 'Starting…' : 'Create voice-over'}</button>
+          <div className="sub"><span>Just the footage, with captions and music</span><button disabled={busy} onClick={() => answer('music')}>Captions & music only ›</button></div>
+          <div className="sub"><span>Not now</span><button disabled={busy} onClick={() => answer('cancel')}>Cancel ›</button></div>
+        </section>
+        {error && <p className="error">{error}</p>}
+      </main>
+    )
+  }
   const plan = out.plan
   const reviewing = job.status === 'needs_review'
   const v = files?.finished_vertical, h = files?.finished_horizontal, t = files?.thumbnail

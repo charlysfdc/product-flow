@@ -21,6 +21,7 @@ export function EditSheet({ productId, clips, mode = 'first', onClose, onStarted
 }) {
   const [picked, setPicked] = useState<Set<string>>(() => new Set(clips.map((c) => c.id)))
   const [note, setNote] = useState('')
+  const [voiceover, setVoiceover] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toggle = (id: string) => setPicked((s) => {
@@ -36,7 +37,7 @@ export function EditSheet({ productId, clips, mode = 'first', onClose, onStarted
     setError(null)
     try {
       const all = picked.size === clips.length
-      const r = await startEdit(productId, all ? undefined : [...picked], note.trim() || undefined)
+      const r = await startEdit(productId, all ? undefined : [...picked], note.trim() || undefined, voiceover || undefined)
       onStarted(r.job_id, r.warning)
     } catch (e) {
       setError((e as Error).message)
@@ -79,6 +80,10 @@ export function EditSheet({ productId, clips, mode = 'first', onClose, onStarted
           {mode === 'again' ? 'What should change?' : 'Anything to know?'} <span className="muted">(optional)</span>
           <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder={mode === 'again' ? 'e.g. Shorter intro. Use the close-up of the bottle.' : "e.g. Start on the reveal. Zanje's take is the better one."} />
         </label>
+        <label className="vo-switch">
+          <input type="checkbox" checked={voiceover} onChange={(e) => setVoiceover(e.target.checked)} />
+          <span><b>Add a voice-over</b><small>For footage without talking or with bad sound: Claude writes a script in your words, you read and approve it, then your voice reads it.</small></span>
+        </label>
         {error && <p className="error">{error}</p>}
         <button className="primary" type="submit" disabled={busy || (clips.length > 0 && picked.size === 0)}>
           {busy ? 'Starting…' : clips.length === 0 ? 'Edit all clips' : `Edit ${picked.size} clip${picked.size === 1 ? '' : 's'}${total ? ` · ${fmtDuration(total)}` : ''}`}
@@ -107,7 +112,10 @@ export function EditStatus({ job, onEdit }: { job: Job; onEdit: () => void }) {
   }
 
   if (job.status === 'needs_review') {
-    return <Link className="pri" to={`/review/${job.id}`}>Review the edit</Link>
+    const stage = job.output?.stage
+    return <Link className="pri" to={stage === 'script' ? `/script/${job.id}` : `/review/${job.id}`}>
+      {stage === 'ask_voiceover' ? 'No talking found: answer' : stage === 'script' ? 'Read the voice-over script' : 'Review the edit'}
+    </Link>
   }
   if (job.status === 'failed' || stuck) {
     return (

@@ -8,6 +8,7 @@ import { Settings } from './pages/Settings'
 import { WaitingDeals } from './pages/WaitingDeals'
 import { AddProduct } from './pages/AddProduct'
 import { Review } from './pages/Review'
+import { Script } from './pages/Script'
 import { Publish } from './pages/Publish'
 import { ProductList, Products } from './pages/Products'
 import { StatDetail, Stats } from './pages/Stats'
@@ -29,6 +30,7 @@ function Gate() {
       <Route path="/settings" element={<Settings />} />
       <Route path="/add" element={<AddProduct />} />
       <Route path="/review/:jobId" element={<Review />} />
+      <Route path="/script/:jobId" element={<Script />} />
       <Route path="/publish/:id" element={<Publish />} />
       <Route path="/products" element={<Products />} />
       <Route path="/products/:list" element={<ProductList />} />

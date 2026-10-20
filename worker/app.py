@@ -138,6 +138,9 @@ class ModalIO:
                 self.log(f"Download of {clip['filename']} interrupted ({e}); resuming.")
         raise RuntimeError(f"Could not download {clip['filename']} from Drive.")
 
+    def download_music(self, track: dict, dest: Path) -> str:
+        return self.download({"id": "music", "filename": track["name"], "drive_file_id": track["id"], "size_bytes": track.get("size")}, dest)
+
     def transcribe(self, wavs: dict[str, bytes], hint: str = "") -> dict:
         # a GPU that can't be had right now, or a dropped connection to it, is retried rather than failing the edit
         for attempt in range(1, 4):

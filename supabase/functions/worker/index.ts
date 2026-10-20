@@ -3,11 +3,12 @@
 //   { action: 'claim', job_id }                 queued -> running; returns the product, clips, plan to redo, Drive token, finished folder, Claude key
 //   { action: 'progress', job_id, step, pct, note, log }   live progress for the phone (jobs is on realtime)
 //   { action: 'token' }                          a fresh Drive access token for a long job
-//   { action: 'finish', job_id, result }         media rows for the finished files; job -> needs_review
+//   { action: 'finish', job_id, result }         job -> needs_review: a question (no talking found: voice-over?), a
+//                                                voice-over script to read, or the finished files (media rows)
 //   { action: 'fail', job_id, error, log }       job -> failed; the product goes back to Filmed
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.118.0'
 import { admin, cors, HttpError, json } from '../_shared/http.ts'
-import { driveToken, ensureFolder } from '../_shared/google.ts'
+import { DRIVE, FOLDER, driveToken, ensureFolder, gd } from '../_shared/google.ts'
 import { isWorker } from '../_shared/worker.ts'
 import { PLATFORM_LABEL } from '../_shared/labels.ts'
 
@@ -24,6 +25,17 @@ function appendLog(old: string | null, lines: unknown): string {
   if (!add.length) return old ?? ''
   const all = [old ?? '', ...add].filter(Boolean).join('\n')
   return all.length > LOG_LIMIT ? all.slice(-LOG_LIMIT) : all
+}
+
+/** Audio files in Content Library/Music (found, never created), for captions-and-music cuts. */
+async function musicTracks(db: SupabaseClient, token: string): Promise<{ id: string; name: string; size?: string }[]> {
+  const { data } = await db.from('google_drive').select('content_library_id').eq('id', true).maybeSingle()
+  if (!data?.content_library_id) return []
+  const q = (s: string) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+  const folder = await gd<{ files: { id: string }[] }>(token, `${DRIVE}/files?q=${encodeURIComponent(`name = 'Music' and mimeType = '${FOLDER}' and '${q(data.content_library_id)}' in parents and trashed = false`)}&fields=files(id)&supportsAllDrives=true&includeItemsFromAllDrives=true`)
+  if (!folder.files[0]) return []
+  const list = await gd<{ files: { id: string; name: string; mimeType?: string; size?: string }[] }>(token, `${DRIVE}/files?q=${encodeURIComponent(`'${q(folder.files[0].id)}' in parents and trashed = false`)}&fields=files(id,name,mimeType,size)&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`)
+  return list.files.filter((f) => (f.mimeType ?? '').startsWith('audio/') || /\.(mp3|m4a|wav|aac)$/i.test(f.name)).map(({ id, name, size }) => ({ id, name, size }))
 }
 
 const fmt = (s: number) => (s >= 60 ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}` : `${Math.round(s)} s`)
@@ -49,7 +61,7 @@ Deno.serve(async (req) => {
           .eq('id', String(body.job_id ?? '')).eq('status', 'queued').select('*')
         const job = claimed?.[0]
         if (!job) return json({ skip: 'This job is not waiting to run (already running, finished or gone).' })
-        const input = (job.input ?? {}) as { clip_ids?: string[]; note?: string; redo_of?: string }
+        const input = (job.input ?? {}) as { clip_ids?: string[]; note?: string; redo_of?: string; voiceover?: string; vo_plan?: unknown; previous_vo_plan?: unknown; script_note?: string }
         const { data: product } = await db.from('products').select('id,name,brand,variant,source,notes,deadline,drive_folder_id').eq('id', job.product_id).single()
         const { data: listings } = await db.from('listings').select('platform,availability').eq('product_id', job.product_id)
         let clipsQ = db.from('media').select('id,drive_file_id,filename,duration_s,width,height,shot_on,size_bytes,codec')
@@ -71,10 +83,21 @@ Deno.serve(async (req) => {
         const key = Deno.env.get('ANTHROPIC_API_KEY')
         if (!key) throw new HttpError(500, 'ANTHROPIC_API_KEY is not set in the Supabase Edge Function secrets.')
         const platforms = [...new Set((listings ?? []).filter((l) => l.availability !== 'not_listed').map((l) => PLATFORM_LABEL[l.platform] ?? l.platform))]
+        // voice-over: the script writer gets the listing/deal title; the reader gets the ElevenLabs key (kept in Supabase)
+        const { data: deal } = await db.from('deals').select('title').eq('product_id', job.product_id).not('title', 'is', null).limit(1).maybeSingle()
+        let elevenlabs = null
+        if (input.voiceover === 'render') {
+          const el = Deno.env.get('ELEVENLABS_API_KEY')
+          if (!el) throw new HttpError(500, 'ELEVENLABS_API_KEY is not set in the Supabase Edge Function secrets, so the voice-over cannot be read yet.')
+          elevenlabs = { api_key: el }
+        }
+        const music_tracks = input.voiceover === 'music' ? await musicTracks(db, token) : []
         return json({
           job: { id: job.id, created_at: job.created_at },
-          product: { ...product, platforms },
+          product: { ...product, platforms, deal_title: deal?.title ?? null },
           clips, note: input.note ?? null, previous_plan, version: count ?? 1,
+          voiceover: input.voiceover ?? null, vo_plan: input.vo_plan ?? null, previous_vo_plan: input.previous_vo_plan ?? null,
+          script_note: input.script_note ?? null, elevenlabs, music_tracks,
           drive: { access_token: token, expires_in, finished_folder_id: finished },
           anthropic: { api_key: key, workspace_id: Deno.env.get('ANTHROPIC_WORKSPACE_ID') ?? null },
         })
@@ -96,6 +119,19 @@ Deno.serve(async (req) => {
       case 'finish': {
         const job = await loadJob(db, body.job_id)
         const result = (body.result ?? {}) as Record<string, any>
+        const now = new Date().toISOString()
+        // the edit stops to ask Charly something before going on
+        if (result.stage === 'ask_voiceover' || result.stage === 'script') {
+          const question = result.stage === 'ask_voiceover'
+            ? 'No talking found in these clips. Create a voice-over?'
+            : `Read the voice-over script (${result.words?.vertical ?? '?'} words vertical, ${result.words?.horizontal ?? '?'} horizontal) before Charly's voice reads it.`
+          await db.from('jobs').update({
+            status: 'needs_review', finished_at: now, question,
+            output: { ...result, progress: { step: result.stage === 'script' ? 'Script ready to read' : 'Waiting for your answer', pct: 100, at: now } },
+            log: appendLog(job.log, body.log ?? question),
+          }).eq('id', job.id)
+          return json({ ok: true })
+        }
         const files = (result.files ?? {}) as Record<string, { drive_file_id: string; filename: string; size_bytes?: number; duration_s?: number; width?: number; height?: number }>
         const media: Record<string, string> = {}
         for (const [kind, f] of Object.entries(files)) {

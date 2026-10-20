@@ -512,3 +512,12 @@ a.add-btn { color: #fff; }
 .tile-done b { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
 .tile-done span { color: var(--primary-muted); font-size: 14px; }
 .tile-done .tile-done-chev { margin-left: auto; font-size: 20px; }
+
+/* ---- Edit: voice-over ---- */
+.vo-switch { display: flex !important; gap: 12px; align-items: flex-start; background: var(--card); border-radius: 14px; padding: 12px 14px; font-weight: 400 !important; }
+.vo-switch input { width: 22px !important; height: 22px; margin: 2px 0 0 !important; flex: none; accent-color: var(--accent); }
+.vo-switch b { display: block; font-weight: 700; }
+.vo-switch small { color: var(--muted); font-size: 14px; }
+.sc-line { display: block; }
+.sc-line textarea { width: 100%; font: inherit; font-size: 17px; line-height: 1.35; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--text); resize: vertical; }
+.sc-line small { display: block; color: var(--muted); font-size: 12px; margin: 3px 4px 0; }

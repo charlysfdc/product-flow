@@ -9,6 +9,9 @@ import { WaitingDeals } from './pages/WaitingDeals'
 import { AddProduct } from './pages/AddProduct'
 import { Review } from './pages/Review'
 import { Publish } from './pages/Publish'
+import { ProductList, Products } from './pages/Products'
+import { StatDetail, Stats } from './pages/Stats'
+import { FixList, HiddenPage, Housekeeping } from './pages/Housekeeping'
 import { UploadBar } from './components/Clips'
 
 function Gate() {
@@ -27,6 +30,13 @@ function Gate() {
       <Route path="/add" element={<AddProduct />} />
       <Route path="/review/:jobId" element={<Review />} />
       <Route path="/publish/:id" element={<Publish />} />
+      <Route path="/products" element={<Products />} />
+      <Route path="/products/:list" element={<ProductList />} />
+      <Route path="/stats" element={<Stats />} />
+      <Route path="/stats/:kind" element={<StatDetail />} />
+      <Route path="/housekeeping" element={<Housekeeping />} />
+      <Route path="/housekeeping/fix/:kind" element={<FixList />} />
+      <Route path="/housekeeping/hidden" element={<HiddenPage />} />
       <Route path="*" element={<Home />} />
     </Routes>
     <UploadBar />

@@ -58,6 +58,17 @@ export function ProductPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const { detail, error, reload } = useProduct(id)
+  // back goes to the list the product was opened from (kept while visiting Edit, Review and Post)
+  const backTo = useMemo(() => {
+    const from = (location.state as { from?: string } | null)?.from
+    const key = `pf.back.${id}`
+    try {
+      if (from) sessionStorage.setItem(key, from)
+      return from ?? sessionStorage.getItem(key) ?? '/'
+    } catch {
+      return from ?? '/'
+    }
+  }, [id, location.state])
   // Home's Edit button opens this screen with the Edit sheet up
   const [sheet, setSheet] = useState<SheetKind>(() => ((location.state as { edit?: boolean } | null)?.edit ? { kind: 'edit' } : null))
   const [busy, setBusy] = useState(false)
@@ -249,7 +260,7 @@ export function ProductPage() {
   return (
     <main>
       <div className="pn">
-        <Link to="/" className="bk" aria-label="Home">‹</Link>
+        <Link to={backTo} className="bk" aria-label="Back">‹</Link>
         <Thumb src={p.product_image_url} name={p.name} />
         <div style={{ minWidth: 0 }}>
           <h1>{p.name}</h1>

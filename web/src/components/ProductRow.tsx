@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import type { Product } from '../lib/types'
 import { STATUS_LABEL } from '../lib/types'
 
@@ -29,9 +29,10 @@ export function Thumb({ src, name, className = 'thumb' }: { src: string | null |
 export function ProductRow({ product, detail, showStatus, to }: { product: Product; detail?: string | null; showStatus?: boolean; to?: string }) {
   const due = deadlineText(product.deadline)
   const n = daysUntil(product.deadline)
+  const here = useLocation()
   return (
     <li>
-      <Link to={to ?? `/product/${product.id}`} className="row">
+      <Link to={to ?? `/product/${product.id}`} state={{ from: here.pathname }} className="row">
         <Thumb src={product.product_image_url} name={product.name} />
         <div className="row-main">
           <div className="row-title">{product.name}</div>

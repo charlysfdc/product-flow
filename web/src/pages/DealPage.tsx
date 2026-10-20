@@ -83,12 +83,12 @@ export function DealPage() {
     }
   }, [navigate])
 
-  if (error && !deal) return <main><Link to="/" className="back">‹ Home</Link><p className="error">{error}</p></main>
-  if (!deal) return <main><Link to="/" className="back">‹ Home</Link><p className="muted">Loading…</p></main>
+  if (error && !deal) return <main><Link to="/products" className="back">‹ Products</Link><p className="error">{error}</p></main>
+  if (!deal) return <main><Link to="/products" className="back">‹ Products</Link><p className="muted">Loading…</p></main>
 
   return (
     <main>
-      <Link to="/" className="back">‹ Home</Link>
+      <Link to="/products" className="back">‹ Products</Link>
       <h1>Brand deal</h1>
       {error && <p className="error">{error}</p>}
       <DealCard deal={deal} productSource={linked?.source} productName={linked?.name} />

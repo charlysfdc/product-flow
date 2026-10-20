@@ -48,7 +48,7 @@ export function WaitingDeals() {
 
   return (
     <main>
-      <Link to="/" className="back">‹ Home</Link>
+      <Link to="/products" className="back">‹ Products</Link>
       <h1>Waiting on brand</h1>
       <p className="muted small">Deals you messaged in ViralVue where nothing has arrived. Tap one when the box turns up.</p>
       <input type="search" className="search" placeholder="Search brand, product or ASIN" value={q} onChange={(e) => setQ(e.target.value)} autoCapitalize="none" autoCorrect="off" />

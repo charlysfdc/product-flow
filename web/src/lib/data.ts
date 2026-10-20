@@ -13,7 +13,11 @@ export interface Snapshot {
   waiting: number        // deals still waiting on the brand (shown)
   quiet: number          // waiting deals that went quiet (hidden)
   reminders: ViralVueReminder[]   // ticks to do by hand in ViralVue ([] before migration 0007)
+  lastImport: string | null       // newest ViralVue deals import
 }
+
+// the last snapshot, so moving between Home, Products and the lists shows it at once while it refreshes
+let cached: Snapshot | null = null
 
 /** PostgREST filter for "still waiting": brand is talking, or messaged within 30 days. */
 export function stillWaitingFilter(): string {
@@ -23,19 +27,20 @@ export function stillWaitingFilter(): string {
 
 /** Loads everything Home needs (a few hundred small rows) and refreshes when rows change. */
 export function useSnapshot() {
-  const [data, setData] = useState<Snapshot | null>(null)
+  const [data, setData] = useState<Snapshot | null>(cached)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const [p, l, po, j, d, w, wAll, vv] = await Promise.all([
+    const [p, l, po, j, d, w, wAll, vv, li] = await Promise.all([
       supabase.from('products').select('*').order('name'),
       supabase.from('listings').select('id,product_id,platform,external_id,url,commission,availability,availability_note,checked_at'),
-      supabase.from('posts').select('id,product_id,platform,status,external_id,title,url,posted_at,views'),
+      supabase.from('posts').select('id,product_id,platform,status,external_id,title,url,posted_at,views,views_checked_at'),
       supabase.from('jobs').select('id,product_id,type,status,question,created_at,updated_at,progress:output->progress').in('status', ['needs_review', 'queued', 'running']),
       supabase.from('deals').select('*').eq('match_status', 'needs_review').order('deal_created_at', { ascending: false }),
       supabase.from('deals').select('id', { count: 'exact', head: true }).eq('match_status', 'waiting').or(stillWaitingFilter()),
       supabase.from('deals').select('id', { count: 'exact', head: true }).eq('match_status', 'waiting'),
       openReminders(supabase),
+      supabase.from('deals').select('imported_at').order('imported_at', { ascending: false }).limit(1),
     ])
     // deals may not exist yet (migration 0002 pending): treat as empty
     const err = p.error ?? l.error ?? po.error ?? j.error
@@ -47,7 +52,7 @@ export function useSnapshot() {
     const all = (p.data ?? []) as Product[]
     const hidden = all.filter(isHidden)
     const hiddenIds = new Set(hidden.map((x) => x.id))
-    setData({
+    cached = {
       products: all.filter((x) => !isHidden(x)),
       hidden,
       listings: (l.data ?? []) as Listing[],
@@ -57,7 +62,9 @@ export function useSnapshot() {
       waiting: w.count ?? 0,
       quiet: Math.max(0, (wAll.count ?? 0) - (w.count ?? 0)),
       reminders: vv.filter((r) => !r.deal?.product_id || !hiddenIds.has(r.deal.product_id)),
-    })
+      lastImport: (li.data?.[0] as { imported_at?: string } | undefined)?.imported_at ?? null,
+    }
+    setData(cached)
   }, [])
 
   useEffect(() => {
@@ -160,4 +167,23 @@ export function useProduct(id: string | undefined) {
   }, [id, tick])
 
   return { detail, error, reload }
+}
+
+export interface DealStats { total: number; messaged: number; received: number; published: number; declined: number }
+
+/** Brand-deal counts for Stats, counted in the database (4,000+ deals are never loaded). */
+export function useDealStats() {
+  const [stats, setStats] = useState<DealStats | null>(null)
+  useEffect(() => {
+    const count = (f: (q: ReturnType<typeof base>) => unknown) => f(base()) as PromiseLike<{ count: number | null }>
+    const base = () => supabase.from('deals').select('id', { count: 'exact', head: true })
+    Promise.all([
+      count((q) => q),
+      count((q) => q.not('message_sent_at', 'is', null)),
+      count((q) => q.not('received_at', 'is', null)),
+      count((q) => q.not('published_at', 'is', null)),
+      count((q) => q.eq('match_status', 'ignored')),
+    ]).then(([t, m, r, p, d]) => setStats({ total: t.count ?? 0, messaged: m.count ?? 0, received: r.count ?? 0, published: p.count ?? 0, declined: d.count ?? 0 }))
+  }, [])
+  return stats
 }

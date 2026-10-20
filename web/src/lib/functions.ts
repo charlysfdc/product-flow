@@ -92,7 +92,8 @@ export const retryEdit = (jobId: string) => callFunction<EditStart>('edit', { ac
 export const approveEdit = (jobId: string) => callFunction<{ ok: boolean }>('edit', { action: 'approve', job_id: jobId })
 
 /** Shelves this cut (finished/Earlier drafts) and starts a new one that adjusts its plan to the note. */
-export const redoEdit = (jobId: string, note: string) => callFunction<EditStart>('edit', { action: 'redo', job_id: jobId, note })
+export const redoEdit = (jobId: string, note: string, voiceover?: boolean) =>
+  callFunction<EditStart>('edit', { action: 'redo', job_id: jobId, note, voiceover })
 
 export interface ReviewFile { url: string; drive_file_id: string; filename: string; duration_s: number | null }
 

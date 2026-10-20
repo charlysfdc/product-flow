@@ -32,7 +32,8 @@ class Piece:
     rotate: str = "none"
     overlays: list[Overlay] = field(default_factory=list)
     hold: float = 0.0         # seconds to hold the last frame (a shot longer than what is left of the clip)
-    gain_db: float = 0.0      # the clip's own sound, e.g. -18 under a voice-over
+    gain_db: float = 0.0      # the clip's own sound, e.g. -12 under a voice-over
+    mute: list[tuple[float, float]] = field(default_factory=list)   # clip-time spans silenced (talking under a voice-over)
     cx: float | None = None   # landscape in 9:16: crop a full-height window centred here (0-1 across), else fit over blur
 
     @property
@@ -74,6 +75,10 @@ def render_piece(p: Piece, out: str, W: int, H: int) -> None:
     n = len(p.overlays) + 1
     if p.probe.has_audio:
         vol = f"volume={p.gain_db}dB," if p.gain_db else ""
+        # silence the talking, keep the rest of the clip's sound (brushing, pouring, clicks)
+        quiet = [(max(s, p.a) - p.a, min(e, p.b) - p.a) for s, e in p.mute if e > p.a and s < p.b]
+        if quiet:
+            vol += "volume=0:enable='" + "+".join(f"between(t,{s:.2f},{e:.2f})" for s, e in quiet) + "',"
         fc.append(f"[0:a]aresample=48000,aformat=channel_layouts=stereo,{vol}afade=t=in:d=0.03,"
                   f"afade=t=out:st={max(d - 0.05, 0):.3f}:d=0.05,apad[aud]")
     else:

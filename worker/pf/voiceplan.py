@@ -36,6 +36,10 @@ the shots, and leave out moments where the camera points at nothing. A landscape
 reframed on the action automatically. If a clip is filmed sideways, set rotate ("left" turns it 90 degrees \
 counter-clockwise, "right" clockwise).
 
+Under the voice, each shot keeps its own sound quietly (brushing, pouring, clicks), and any talking in the clips \
+is silenced automatically, whatever language it is in. So use shots with talking freely when the picture is right, \
+and prefer moments whose sound helps (a brush on leather, a pour, a snap shut).
+
 Hook: a short on-screen line (at most 7 words) shown over the first 2.6 seconds of the vertical cut. Key words: 3-8 \
 single words shown in yellow in the captions. Thumbnail: one real frame (clip and time) where the product is clear \
 and sharp, and a 2-5 word phrase. Never invent people or scenes."""

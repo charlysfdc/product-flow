@@ -22,6 +22,9 @@ export function Review() {
   const [busy, setBusy] = useState(false)
   const [redo, setRedo] = useState(false)
   const [note, setNote] = useState('')
+  // null: follow the note ("add a voice-over" ticks it); true/false once Charly taps the switch
+  const [voTouched, setVoTouched] = useState<boolean | null>(null)
+  const switchToVoice = voTouched ?? /voice[\s-]?over/i.test(note)
 
   useEffect(() => {
     if (!jobId) return
@@ -63,7 +66,7 @@ export function Review() {
     setBusy(true)
     setError(null)
     try {
-      const r = await redoEdit(job.id, note.trim())
+      const r = await redoEdit(job.id, note.trim(), switchToVoice || undefined)
       navigate(`/product/${job.product_id}`, { replace: true, state: r.warning ? { notice: r.warning } : undefined })
     } catch (e) {
       setError((e as Error).message)
@@ -114,6 +117,7 @@ export function Review() {
   }
   const plan = out.plan
   const reviewing = job.status === 'needs_review'
+  const ownAudio = out.voiceover !== 'voice'
   const v = files?.finished_vertical, h = files?.finished_horizontal, t = files?.thumbnail
 
   return (
@@ -198,6 +202,12 @@ export function Review() {
               Note
               <textarea rows={4} autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Open on the pour. Cut the bit about the scale. Thumbnail text: Liquid gold." />
             </label>
+            {ownAudio && (
+              <label className="vo-switch">
+                <input type="checkbox" checked={switchToVoice} onChange={(e) => setVoTouched(e.target.checked)} />
+                <span><b>Switch to a voice-over</b><small>Your voice reads a script Claude writes from this note; you read and approve it first. Talking in the clips is muted, the other sounds (brushing, pouring) stay.</small></span>
+              </label>
+            )}
             {error && <p className="error">{error}</p>}
             <button className="primary" type="submit" disabled={busy || !note.trim()}>{busy ? 'Starting…' : 'Redo the edit'}</button>
           </form>

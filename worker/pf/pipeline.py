@@ -312,6 +312,8 @@ def run_script(ctx: dict, io: IO, work: Path) -> dict:
     plan, problems, usage = voiceplan.make_plan(io.claude(), product, clips, ctx.get("script_note") or ctx.get("note"),
                                                 ctx.get("previous_vo_plan"), log=io.log)
     timer.mark("plan")
+    # where people talk in each clip, so the voiced cut can silence it and keep the rest of the sound
+    plan["speech"] = {c.filename: talking(c.words) for c in clips if c.words}
     return {"stage": "script", "vo_plan": plan, "problems": problems, "clips": {c.id: c.filename for c in clips},
             "skipped": dropped, "timings": timer.marks, "claude": claude_cost(usage),
             "words": {"vertical": voiceplan.words_in(plan["vertical"]), "horizontal": voiceplan.words_in(plan["horizontal"])}}
@@ -328,7 +330,20 @@ def spread(overlays: list[tuple[str, float, float]], pieces: list[Piece]) -> Non
         t0 = t1
 
 
-def line_pieces(lines: list[dict], spans: list[tuple[float, float]], clips: dict[str, planner.Clip]) -> list[tuple[int, Piece]]:
+def talking(words: list[dict], pad: float = 0.3, join: float = 0.8) -> list[list[float]]:
+    """The stretches of a clip where someone talks: words padded and merged across short gaps."""
+    out: list[list[float]] = []
+    for w in words:
+        s, e = max(0.0, w["s"] - pad), w["e"] + pad
+        if out and s - out[-1][1] <= join:
+            out[-1][1] = max(out[-1][1], e)
+        else:
+            out.append([round(s, 2), round(e, 2)])
+    return [[round(s, 2), round(e, 2)] for s, e in out]
+
+
+def line_pieces(lines: list[dict], spans: list[tuple[float, float]], clips: dict[str, planner.Clip],
+                speech: dict[str, list] | None = None) -> list[tuple[int, Piece]]:
     """Each line's time shared evenly by its shots; a shot runs from its start on the clip (held on its last frame
     when the clip ends first)."""
     out = []
@@ -340,7 +355,11 @@ def line_pieces(lines: list[dict], spans: list[tuple[float, float]], clips: dict
             avail = c.probe.duration - 0.05
             a = max(0.0, min(float(sh["start"]), avail - d))
             b = min(avail, a + d)
-            p = Piece(src=c.path, probe=c.probe, a=round(a, 3), b=round(b, 3), rotate=sh.get("rotate", "none"), gain_db=-18.0)
+            # the clip's own sound stays under the voice; when we know where people talk, that is silenced
+            # and the rest (brushing, pouring) can be a little louder
+            p = Piece(src=c.path, probe=c.probe, a=round(a, 3), b=round(b, 3), rotate=sh.get("rotate", "none"),
+                      gain_db=-18.0 if speech is None else -12.0,
+                      mute=[(float(s), float(e)) for s, e in (speech or {}).get(c.filename, [])])
             p.hold = round(max(0.0, d - (b - a)), 3)
             # no face reframe here: these shots are about the product, and a face in them is often a stranger
             out.append((k, p))
@@ -407,7 +426,7 @@ def run_voiced(ctx: dict, io: IO, work: Path, music: bool) -> dict:
                 overlays.append((str(png), cs, ce))
             bed, bed_db = voiced.wav, 0.0
         io.progress(f"Rendering the {which} cut", pct + 8, f"{total:.0f} s")
-        lp = line_pieces(lines, spans, by_id)
+        lp = line_pieces(lines, spans, by_id, None if music else plan.get("speech"))
         pieces = [p for _, p in lp]
         if vertical and plan.get("hook"):
             png = cw / "hook.png"

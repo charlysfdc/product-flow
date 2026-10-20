@@ -220,9 +220,12 @@ serve(async (body, { user, db }) => {
       await shelve(db, job)
       await db.from('jobs').update({ status: 'done', question: null, output: { ...(job.output ?? {}), media: {}, verdict: 'redo', redo_note: note, reviewed_by: user.email, reviewed_at: new Date().toISOString() } }).eq('id', job.id)
       const clipIds = (job.input?.clip_ids as string[] | undefined) ?? undefined
-      // a voiced cut goes back to its script: Claude adjusts it to the note and Charly reads it again
+      // a voiced cut goes back to its script: Claude adjusts it to the note and Charly reads it again.
+      // "Switch to a voice-over" on the Redo sheet does the same for a cut made from the clips' own audio:
+      // the original-audio editor may never add a voice, so the note alone could not ask for one.
       const extra = job.output?.voiceover === 'voice'
         ? { voiceover: 'script', previous_vo_plan: job.output?.vo_plan ?? null, script_note: note }
+        : body.voiceover ? { voiceover: 'script', script_note: note }
         : job.output?.voiceover === 'music' ? { voiceover: 'music' } : {}
       return await start(db, user.id, job.product_id, clipIds, note, job.id, job.input?.from_status, extra)
     }

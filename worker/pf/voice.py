@@ -16,9 +16,9 @@ VOICE_NAME = "Charly South African"
 MODEL = "eleven_v3"
 # Charly's accent: without the Afrikaans override the clone reads English with a Dutch-sounding accent
 # (Charly, 20 Oct 2026). Same setting as ~/meta-api/werf_teaser/vo.py. ACCENT_TAG is spoken as a v3 audio
-# tag before the script when set; Charly picks between the two samples in Products/Airplane.../finished/Voice samples.
+# tag before the script; Charly picked it over the override alone (Voice samples A/B, 20 Oct 2026).
 LANGUAGE = "af"
-ACCENT_TAG = ""
+ACCENT_TAG = "[South African Afrikaans accent]"
 TAIL = 0.6                                   # picture after the last word
 
 

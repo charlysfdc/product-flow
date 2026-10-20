@@ -38,6 +38,50 @@ async function musicTracks(db: SupabaseClient, token: string): Promise<{ id: str
   return list.files.filter((f) => (f.mimeType ?? '').startsWith('audio/') || /\.(mp3|m4a|wav|aac)$/i.test(f.name)).map(({ id, name, size }) => ({ id, name, size }))
 }
 
+/** Everything one edit needs, for a job just set to running. */
+async function claimContext(db: SupabaseClient, job: Record<string, any>) {
+  const input = (job.input ?? {}) as { clip_ids?: string[]; note?: string; redo_of?: string; voiceover?: string; vo_plan?: unknown; previous_vo_plan?: unknown; script_note?: string }
+  const { data: product } = await db.from('products').select('id,name,brand,variant,source,notes,deadline,drive_folder_id').eq('id', job.product_id).single()
+  const { data: listings } = await db.from('listings').select('platform,availability').eq('product_id', job.product_id)
+  let clipsQ = db.from('media').select('id,drive_file_id,filename,duration_s,width,height,shot_on,size_bytes,codec')
+    .eq('product_id', job.product_id).eq('kind', 'raw_clip').not('drive_file_id', 'is', null).order('filename')
+  if (input.clip_ids?.length) clipsQ = clipsQ.in('id', input.clip_ids)
+  const { data: clips, error: ce } = await clipsQ
+  if (ce) throw new HttpError(500, ce.message)
+  if (!clips?.length) throw new HttpError(409, 'The product has no raw clips in Drive.')
+  if (!product?.drive_folder_id) throw new HttpError(409, 'The product has no Drive folder.')
+  let previous_plan = null
+  if (input.redo_of) {
+    const { data: prev } = await db.from('jobs').select('output').eq('id', input.redo_of).maybeSingle()
+    previous_plan = (prev?.output as { plan?: unknown } | null)?.plan ?? null
+  }
+  const { count } = await db.from('jobs').select('id', { count: 'exact', head: true })
+    .eq('product_id', job.product_id).eq('type', 'edit').lte('created_at', job.created_at)
+  const { token, expires_in } = await driveToken(db)
+  const finished = await ensureFolder(token, 'finished', product.drive_folder_id)
+  const key = Deno.env.get('ANTHROPIC_API_KEY')
+  if (!key) throw new HttpError(500, 'ANTHROPIC_API_KEY is not set in the Supabase Edge Function secrets.')
+  const platforms = [...new Set((listings ?? []).filter((l) => l.availability !== 'not_listed').map((l) => PLATFORM_LABEL[l.platform] ?? l.platform))]
+  // voice-over: the script writer gets the listing/deal title; the reader gets the ElevenLabs key (kept in Supabase)
+  const { data: deal } = await db.from('deals').select('title').eq('product_id', job.product_id).not('title', 'is', null).limit(1).maybeSingle()
+  let elevenlabs = null
+  if (input.voiceover === 'render') {
+    const el = Deno.env.get('ELEVENLABS_API_KEY')
+    if (!el) throw new HttpError(500, 'ELEVENLABS_API_KEY is not set in the Supabase Edge Function secrets, so the voice-over cannot be read yet.')
+    elevenlabs = { api_key: el }
+  }
+  const music_tracks = input.voiceover === 'music' ? await musicTracks(db, token) : []
+  return {
+    job: { id: job.id, created_at: job.created_at },
+    product: { ...product, platforms, deal_title: deal?.title ?? null },
+    clips, note: input.note ?? null, previous_plan, version: count ?? 1,
+    voiceover: input.voiceover ?? null, vo_plan: input.vo_plan ?? null, previous_vo_plan: input.previous_vo_plan ?? null,
+    script_note: input.script_note ?? null, elevenlabs, music_tracks,
+    drive: { access_token: token, expires_in, finished_folder_id: finished },
+    anthropic: { api_key: key, workspace_id: Deno.env.get('ANTHROPIC_WORKSPACE_ID') ?? null },
+  }
+}
+
 const fmt = (s: number) => (s >= 60 ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}` : `${Math.round(s)} s`)
 
 /** Back to where it was (Filmed, or Ready for a new cut of an edited product) when no other edit is on its way. */
@@ -61,49 +105,21 @@ Deno.serve(async (req) => {
           .eq('id', String(body.job_id ?? '')).eq('status', 'queued').select('*')
         const job = claimed?.[0]
         if (!job) return json({ skip: 'This job is not waiting to run (already running, finished or gone).' })
-        const input = (job.input ?? {}) as { clip_ids?: string[]; note?: string; redo_of?: string; voiceover?: string; vo_plan?: unknown; previous_vo_plan?: unknown; script_note?: string }
-        const { data: product } = await db.from('products').select('id,name,brand,variant,source,notes,deadline,drive_folder_id').eq('id', job.product_id).single()
-        const { data: listings } = await db.from('listings').select('platform,availability').eq('product_id', job.product_id)
-        let clipsQ = db.from('media').select('id,drive_file_id,filename,duration_s,width,height,shot_on,size_bytes,codec')
-          .eq('product_id', job.product_id).eq('kind', 'raw_clip').not('drive_file_id', 'is', null).order('filename')
-        if (input.clip_ids?.length) clipsQ = clipsQ.in('id', input.clip_ids)
-        const { data: clips, error: ce } = await clipsQ
-        if (ce) throw new HttpError(500, ce.message)
-        if (!clips?.length) throw new HttpError(409, 'The product has no raw clips in Drive.')
-        if (!product?.drive_folder_id) throw new HttpError(409, 'The product has no Drive folder.')
-        let previous_plan = null
-        if (input.redo_of) {
-          const { data: prev } = await db.from('jobs').select('output').eq('id', input.redo_of).maybeSingle()
-          previous_plan = (prev?.output as { plan?: unknown } | null)?.plan ?? null
+        try {
+          return json(await claimContext(db, job))
+        } catch (e) {
+          // a job that can't start must not sit at "running": record why, so the phone shows it and Try again works
+          const error = (e as Error).message
+          await db.from('jobs').update({ status: 'failed', finished_at: new Date().toISOString(),
+            output: { error, progress: { step: 'Failed', pct: 0, note: error.slice(0, 300), at: new Date().toISOString() } },
+            log: appendLog(job.log, `Could not start: ${error}`) }).eq('id', job.id)
+          if (job.product_id) await releaseProduct(db, job.product_id, job.id, (job.input as { from_status?: string } | null)?.from_status)
+          throw e
         }
-        const { count } = await db.from('jobs').select('id', { count: 'exact', head: true })
-          .eq('product_id', job.product_id).eq('type', 'edit').lte('created_at', job.created_at)
-        const { token, expires_in } = await driveToken(db)
-        const finished = await ensureFolder(token, 'finished', product.drive_folder_id)
-        const key = Deno.env.get('ANTHROPIC_API_KEY')
-        if (!key) throw new HttpError(500, 'ANTHROPIC_API_KEY is not set in the Supabase Edge Function secrets.')
-        const platforms = [...new Set((listings ?? []).filter((l) => l.availability !== 'not_listed').map((l) => PLATFORM_LABEL[l.platform] ?? l.platform))]
-        // voice-over: the script writer gets the listing/deal title; the reader gets the ElevenLabs key (kept in Supabase)
-        const { data: deal } = await db.from('deals').select('title').eq('product_id', job.product_id).not('title', 'is', null).limit(1).maybeSingle()
-        let elevenlabs = null
-        if (input.voiceover === 'render') {
-          const el = Deno.env.get('ELEVENLABS_API_KEY')
-          if (!el) throw new HttpError(500, 'ELEVENLABS_API_KEY is not set in the Supabase Edge Function secrets, so the voice-over cannot be read yet.')
-          elevenlabs = { api_key: el }
-        }
-        const music_tracks = input.voiceover === 'music' ? await musicTracks(db, token) : []
-        return json({
-          job: { id: job.id, created_at: job.created_at },
-          product: { ...product, platforms, deal_title: deal?.title ?? null },
-          clips, note: input.note ?? null, previous_plan, version: count ?? 1,
-          voiceover: input.voiceover ?? null, vo_plan: input.vo_plan ?? null, previous_vo_plan: input.previous_vo_plan ?? null,
-          script_note: input.script_note ?? null, elevenlabs, music_tracks,
-          drive: { access_token: token, expires_in, finished_folder_id: finished },
-          anthropic: { api_key: key, workspace_id: Deno.env.get('ANTHROPIC_WORKSPACE_ID') ?? null },
-        })
       }
 
       case 'progress': {
+
         const job = await loadJob(db, body.job_id)
         if (job.status !== 'running') return json({ ok: false, status: job.status })
         const output = { ...(job.output ?? {}), progress: { step: String(body.step ?? ''), pct: Number(body.pct) || 0, note: body.note ? String(body.note) : null, at: new Date().toISOString() } }

@@ -244,6 +244,10 @@ def run(ctx: dict, io: IO, work: Path) -> dict:
     io.progress("Claude is planning the cut", 45)
     product = {**product, "duplicates_left_out": len(dropped)} if dropped else product
     plan, resolved, usage = planner.make_plan(io.claude(), product, clips, ctx.get("note"), ctx.get("previous_plan"), log=io.log)
+    if not plan.get("spoken_review", True):
+        io.log("Nobody talks about the product in these clips (only background speech).")
+        return {"stage": "ask_voiceover", "speech": {**speech, "background_only": True}, "footage": plan["footage"],
+                "clips": {c.id: c.filename for c in clips}, "skipped": dropped, "timings": timer.marks, "claude": claude_cost(usage)}
     by_id = {c.id: c for c in clips}
     # last line of defence for the TikTok rule: a vertical moment that still says Amazon is dropped
     vert = [s for s in resolved["vertical"] if not planner.AMAZON.search(s["said"])]

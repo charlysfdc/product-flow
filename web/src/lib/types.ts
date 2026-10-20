@@ -117,7 +117,8 @@ export interface ScriptLine { say: string; seconds: number; shots: { clip: strin
 export interface EditOutput {
   // where the edit stopped: a question (no talking found), a script to read, or a finished cut
   stage?: 'ask_voiceover' | 'script' | 'cut'
-  speech?: { words: number; spoken_s: number; footage_s: number }
+  speech?: { words: number; spoken_s: number; footage_s: number; background_only?: boolean }
+  footage?: string
   vo_plan?: { hook: string; product_label: string; footage: string; concerns: string; vertical: ScriptLine[]; horizontal: ScriptLine[] }
   words?: { vertical: number; horizontal: number }
   voiceover?: 'voice' | 'music'

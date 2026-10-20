@@ -99,7 +99,9 @@ export function Review() {
           <span className="eyebrow">Your answer</span>
           <h2>Create a voice-over?</h2>
           <p>
-            {out.speech ? `${out.speech.words} word${out.speech.words === 1 ? '' : 's'} in ${fmtDuration(out.speech.footage_s)} of footage, so there is nothing to caption. ` : ''}
+            {out.speech?.background_only
+              ? 'Only background talking (an announcement, a TV, other people); nobody talks about the product. '
+              : out.speech ? `${out.speech.words} word${out.speech.words === 1 ? '' : 's'} in ${fmtDuration(out.speech.footage_s)} of footage, so there is nothing to caption. ` : ''}
             Claude can write a script in your words for your own voice to read. You read and change the script first; nothing is spoken until you approve it.
           </p>
           <button className="pri" disabled={busy} onClick={() => answer('voice')}>{busy ? 'Starting…' : 'Create voice-over'}</button>

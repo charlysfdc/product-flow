@@ -104,9 +104,11 @@ SCHEMA = {
             "required": ["clip", "time", "text", "text_position"], "additionalProperties": False,
         },
         "concerns": {"type": "string", "description": "anything weak or missing in the footage Charly should know; empty if none"},
+        "spoken_review": {"type": "boolean", "description": "true if Charly or Zanje talk about the product somewhere in the "
+                          "clips; false if nobody does (no speech, or only background speech such as announcements, TV or strangers)"},
     },
     "required": ["footage", "product_label", "hook", "keys", "caption_fixes", "vertical", "horizontal",
-                 "horizontal_captions", "thumbnail", "concerns"],
+                 "horizontal_captions", "thumbnail", "concerns", "spoken_review"],
     "additionalProperties": False,
 }
 
@@ -337,11 +339,15 @@ def _ask(client: anthropic.Anthropic, messages: list[dict], usage: Usage):
 
 def make_plan(client: anthropic.Anthropic, product: dict, clips: list[Clip], note: str | None,
               previous: dict | None, log=print) -> tuple[dict, dict, Usage]:
-    """The plan, its resolved pieces, and token usage. One revision round when the plan breaks a rule."""
+    """The plan, its resolved pieces, and token usage. One revision round when the plan breaks a rule.
+    When nobody talks about the product (plan["spoken_review"] false) the plan is returned unchecked: the
+    caller asks Charly about a voice-over instead of rendering it."""
     usage = Usage()
     by_id = {c.id: c for c in clips}
     messages = build_request(product, clips, note, previous)
     msg, plan = _ask(client, messages, usage)
+    if not plan.get("spoken_review", True):
+        return plan, {"vertical": [], "horizontal": [], "vertical_s": 0, "horizontal_s": 0, "problems": []}, usage
     resolved, problems = check(plan, by_id)
     if problems:
         log("Plan needs a revision: " + " | ".join(problems))

@@ -59,6 +59,14 @@ filmed sideways (people or text lying on their side), set rotate on its moments 
 counter-clockwise, "right" clockwise). Label a moment "Mom" or "Daughter" only when the cut compares Charly and \
 Zanje and a viewer would otherwise not know who is speaking; otherwise leave label empty.
 
+Talking over product shots: a talk moment may set cover, one to four shots (a clip and the second on that clip \
+where the shot starts, plus rotate) shown instead of the speaker while the moment's words play. The shots share the \
+moment's time evenly, in order, and only the speaker's words are heard. Use cover when the speaker's own picture \
+does not show the product (a selfie or mirror talk with the product out of frame), when Charly asks for their voice \
+over product shots or not to show their face, and to break up a long static talk. Pick shots where the product is \
+clearly visible and something happens, matching what is said, with enough footage after the start. Leave cover \
+empty to show the speaker. A product shot used as cover can also appear as its own "show" moment.
+
 Hook: a short on-screen line (at most 7 words, no emoji, no hashtags) shown over the first 2.6 seconds of the \
 vertical cut; it adds curiosity to the first moment rather than repeating it. Key words: 3-8 single words that \
 are shown in yellow in captions and text (product features, results, surprises).
@@ -66,6 +74,12 @@ are shown in yellow in captions and text (product features, results, surprises).
 Thumbnail: pick one real frame (clip and time) where the product and, ideally, a face are clear and the image \
 is sharp, and a 2-5 word phrase for it. Never invent people or scenes; the thumbnail is always a real frame."""
 
+COVER = {
+    "type": "object",
+    "properties": {"clip": {"type": "string"}, "start": {"type": "number"},
+                   "rotate": {"type": "string", "enum": ["none", "left", "right", "flip"]}},
+    "required": ["clip", "start", "rotate"], "additionalProperties": False,
+}
 SEG = {
     "type": "object",
     "properties": {
@@ -77,9 +91,11 @@ SEG = {
         "last_words": {"type": "string"},
         "rotate": {"type": "string", "enum": ["none", "left", "right", "flip"]},
         "label": {"type": "string"},
+        "cover": {"type": "array", "items": COVER,
+                  "description": "talk moments only: shots shown instead of the speaker while these words play; empty to show the speaker"},
         "why": {"type": "string", "description": "one short reason this moment is in the cut"},
     },
-    "required": ["clip", "start", "end", "kind", "first_words", "last_words", "rotate", "label", "why"],
+    "required": ["clip", "start", "end", "kind", "first_words", "last_words", "rotate", "label", "cover", "why"],
     "additionalProperties": False,
 }
 SCHEMA = {
@@ -270,6 +286,12 @@ def resolve(plan: dict, clips: dict[str, Clip], which: str) -> tuple[list[dict],
         said = " ".join(w["w"] for w in c.words if w["s"] >= a - 0.05 and w["e"] <= b + 0.1)
         if which == "vertical" and AMAZON.search(said):
             problems.append(f"vertical moment {n + 1} ({c.id} {a:.1f}-{b:.1f}) says Amazon: \"{said[:120]}\".")
+        for s in seg.get("cover") or []:
+            cc = clips.get(s["clip"])
+            if not cc:
+                problems.append(f"{which} moment {n + 1}: its cover names clip {s['clip']}, which does not exist.")
+            elif not 0 <= float(s["start"]) < cc.probe.duration:
+                problems.append(f"{which} moment {n + 1}: cover clip {cc.id} is {cc.probe.duration:.1f} s long; {s['start']} is outside it.")
         out.append({**seg, "a": a, "b": b, "spans": spans, "said": said, "snap_note": note,
                     "length": round(sum(y - x for x, y in spans), 2)})
     return out, problems

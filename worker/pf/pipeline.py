@@ -106,11 +106,22 @@ def pieces_for(which: str, resolved: list[dict], clips: dict[str, planner.Clip],
     last_moment = len(resolved) - 1
     for n, seg in enumerate(resolved):
         c = clips[seg["clip"]]
-        portrait = c.probe.portrait != (seg["rotate"] in ("left", "right"))
-        for k, (a, b) in enumerate(seg["spans"]):
-            p = Piece(src=c.path, probe=c.probe, a=a, b=b, rotate=seg["rotate"])
-            if vertical and not portrait and seg["rotate"] == "none":
-                p.cx = face_centre(c, (a + b) / 2, work)
+        covers = [s for s in seg.get("cover") or [] if s["clip"] in clips] if seg["kind"] == "talk" else []
+        parts = cover_parts(seg["spans"], covers, c.words) if covers else [(a, b, None) for a, b in seg["spans"]]
+        for k, (a, b, shot) in enumerate(parts):
+            if shot:   # the words of [a, b] over a product shot from another clip (or another moment of this one)
+                sc, d = clips[shot["clip"]], b - a
+                avail = sc.probe.duration - 0.05
+                s0 = max(0.0, min(float(shot["start"]), avail - d))
+                p = Piece(src=sc.path, probe=sc.probe, a=round(s0, 3), b=round(min(avail, s0 + d), 3), rotate=shot.get("rotate", "none"),
+                          voice=(c.path, a))
+                p.hold = round(max(0.0, d - p.dur), 3)
+                portrait = sc.probe.portrait != (p.rotate in ("left", "right"))
+            else:
+                p = Piece(src=c.path, probe=c.probe, a=a, b=b, rotate=seg["rotate"])
+                portrait = c.probe.portrait != (seg["rotate"] in ("left", "right"))
+                if vertical and not portrait and seg["rotate"] == "none":
+                    p.cx = face_centre(c, (a + b) / 2, work)
             full = portrait or p.cx is not None   # the frame is filled: text sits as on upright footage
             tag = f"{which[0]}{n:02d}_{k:02d}"
             if vertical or plan.get("horizontal_captions", True):
@@ -119,7 +130,7 @@ def pieces_for(which: str, resolved: list[dict], clips: dict[str, planner.Clip],
                         p.overlays.append(text_overlay(ws, work / f"{tag}_c{j:02d}.png", W, H, 84, 0.72 if full else 0.78, cs, ce, 920))
                     else:
                         p.overlays.append(text_overlay(ws, work / f"{tag}_c{j:02d}.png", W, H, 60, 0.88, cs, ce, 1500))
-            if seg.get("label", "").strip().lower() in SPEAKERS:   # who is talking, never the product name
+            if not shot and seg.get("label", "").strip().lower() in SPEAKERS:   # who is talking, never the product name
                 y = (0.085 if full else 0.29) if vertical else 0.08
                 p.overlays.append(text_overlay([(seg["label"].upper(), True)], work / f"{tag}_l.png", W, H, 62 if vertical else 48, y, 0, p.dur))
             if vertical and t_out == 0.0 and plan.get("hook"):
@@ -130,8 +141,34 @@ def pieces_for(which: str, resolved: list[dict], clips: dict[str, planner.Clip],
             if not vertical and t_out == 0.0 and plan.get("product_label"):
                 p.overlays.append(text_overlay(words_of(plan["product_label"], set()), work / "h_name.png", W, H, 76, 0.12, 0, min(3.5, p.dur), 1600))
             out.append(p)
-            t_out += p.dur
+            t_out += p.dur + p.hold
     return out
+
+
+def cover_parts(spans: list[tuple[float, float]], covers: list[dict], words: list[dict]) -> list[tuple[float, float, dict]]:
+    """A talk moment's spans cut into pieces that each play under one cover shot: the shots share the moment's
+    time evenly, and each change of shot moves to the nearest gap between words so no caption is split."""
+    total = sum(b - a for a, b in spans)
+    n = len(covers)
+    step = total / n
+    ends = [w["e"] for w in words]
+    out: list[tuple[float, float, dict]] = []
+    t = 0.0   # moment time at the start of the current span
+    for a, b in spans:
+        x = a
+        while x < b - 0.05:
+            pos = t + (x - a)
+            i = min(n - 1, int(pos / step + 1e-6))
+            y = min(b, a + (step * (i + 1) - t)) if i < n - 1 else b
+            if y < b:
+                near = [e for e in ends if x + 0.5 < e < b - 0.3 and abs(e - y) <= 0.8]
+                if near:
+                    y = min(near, key=lambda e: abs(e - y)) + 0.05
+            # a shot split over two pieces carries on where it left off
+            out.append((round(x, 3), round(y, 3), {**covers[i], "start": float(covers[i]["start"]) + max(0.0, pos - step * i)}))
+            x = y
+        t += b - a
+    return [(x, y, s) for x, y, s in out if y - x >= 0.15]
 
 
 def safe_name(s: str) -> str:

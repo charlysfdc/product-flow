@@ -24,7 +24,8 @@ export function Review() {
   const [note, setNote] = useState('')
   // null: follow the note ("add a voice-over" ticks it); true/false once Charly taps the switch
   const [voTouched, setVoTouched] = useState<boolean | null>(null)
-  const switchToVoice = voTouched ?? /voice[\s-]?over/i.test(note)
+  // "add a voice over" ticks it; "my voice over the product shots" (Charly's real voice) does not
+  const switchToVoice = voTouched ?? /\ban?\s+voice[\s-]?over\b|voice-over|voiceover/i.test(note)
 
   useEffect(() => {
     if (!jobId) return
@@ -205,7 +206,7 @@ export function Review() {
             {ownAudio && (
               <label className="vo-switch">
                 <input type="checkbox" checked={switchToVoice} onChange={(e) => setVoTouched(e.target.checked)} />
-                <span><b>Switch to a voice-over</b><small>Your voice reads a script Claude writes from this note; you read and approve it first. Talking in the clips is muted, the other sounds (brushing, pouring) stay.</small></span>
+                <span><b>Switch to a voice-over</b><small>Your voice reads a script Claude writes from this note; you read and approve it first. Talking in the clips is muted, the other sounds (brushing, pouring) stay. To keep your real voice over product shots instead, leave this off and say so in the note.</small></span>
               </label>
             )}
             {error && <p className="error">{error}</p>}

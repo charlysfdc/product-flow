@@ -14,6 +14,11 @@ from .ffx import duration, ff
 VOICE_ID = "96Sqoi9Yf75d9Lu4UGvK"          # "Charly South African"
 VOICE_NAME = "Charly South African"
 MODEL = "eleven_v3"
+# Charly's accent: without the Afrikaans override the clone reads English with a Dutch-sounding accent
+# (Charly, 20 Oct 2026). Same setting as ~/meta-api/werf_teaser/vo.py. ACCENT_TAG is spoken as a v3 audio
+# tag before the script when set; Charly picks between the two samples in Products/Airplane.../finished/Voice samples.
+LANGUAGE = "af"
+ACCENT_TAG = ""
 TAIL = 0.6                                   # picture after the last word
 
 
@@ -31,7 +36,7 @@ def tts(api_key: str, text: str, out_mp3: Path) -> dict:
     r = requests.post(
         f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}/with-timestamps",
         headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-        json={"text": text, "model_id": MODEL,
+        json={"text": text, "model_id": MODEL, "language_code": LANGUAGE,
               "voice_settings": {"stability": 0.5, "similarity_boost": 0.75, "style": 0.0, "use_speaker_boost": True}},
         timeout=300,
     )
@@ -44,8 +49,14 @@ def tts(api_key: str, text: str, out_mp3: Path) -> dict:
 
 def _words(al: dict, sp: float) -> list[dict]:
     words, cur, ws, pe = [], "", None, 0.0
+    tag = False   # audio tags like [South African accent] are in the alignment but not spoken: skip them
     for c, s, e in zip(al["characters"], al["character_start_times_seconds"], al["character_end_times_seconds"]):
         s, e = s / sp, e / sp
+        if c == "[":
+            tag = True
+        if tag:
+            tag = c != "]"
+            continue
         if c.isspace():
             if cur:
                 words.append({"w": cur, "s": round(ws, 3), "e": round(pe, 3)})
@@ -64,7 +75,7 @@ def speak(api_key: str, lines: list[str], work: Path, max_s: float) -> Voiced:
     """Reads the script lines in one take; speeds it up a little (at most 1.2x) when it runs past max_s."""
     work.mkdir(parents=True, exist_ok=True)
     text = " ".join(l.strip() for l in lines if l.strip())
-    al = tts(api_key, text, work / "voice.mp3")
+    al = tts(api_key, f"{ACCENT_TAG} {text}" if ACCENT_TAG else text, work / "voice.mp3")
     raw = duration(str(work / "voice.mp3"))
     sp = round(min(1.2, max(1.0, raw / max_s)), 3)
     wav = work / "voice.wav"

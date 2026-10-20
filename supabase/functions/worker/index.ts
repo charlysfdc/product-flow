@@ -100,9 +100,14 @@ Deno.serve(async (req) => {
 
     switch (body.action) {
       case 'claim': {
-        const { data: claimed } = await db.from('jobs')
-          .update({ status: 'running', started_at: new Date().toISOString(), finished_at: null, output: { progress: { step: 'Starting', pct: 1 } } })
-          .eq('id', String(body.job_id ?? '')).eq('status', 'queued').select('*')
+        const callId = body.call_id ? String(body.call_id) : null
+        const fresh = { status: 'running', started_at: new Date().toISOString(), finished_at: null, output: { progress: { step: 'Starting', pct: 1 }, call_id: callId } }
+        let { data: claimed } = await db.from('jobs').update(fresh).eq('id', String(body.job_id ?? '')).eq('status', 'queued').select('*')
+        // the same Modal call again (its machine was replaced mid-edit): it takes its own running job back
+        if (!claimed?.length && callId) {
+          ;({ data: claimed } = await db.from('jobs').update({ ...fresh, output: { progress: { step: 'Starting again', pct: 1 }, call_id: callId } })
+            .eq('id', String(body.job_id ?? '')).eq('status', 'running').eq('output->>call_id', callId).select('*'))
+        }
         const job = claimed?.[0]
         if (!job) return json({ skip: 'This job is not waiting to run (already running, finished or gone).' })
         try {

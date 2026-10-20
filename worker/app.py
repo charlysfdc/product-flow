@@ -206,7 +206,8 @@ def edit_job(job_id: str) -> dict:
 
     t0 = time.time()
     api = WorkerAPI()
-    ctx = api.call("claim", job_id=job_id)
+    # Modal can restart a run on another machine; the restarted run has the same call id and may take its job back
+    ctx = api.call("claim", job_id=job_id, call_id=modal.current_function_call_id())
     if ctx.get("skip"):
         print("skip:", ctx["skip"])
         return {"skipped": ctx["skip"]}

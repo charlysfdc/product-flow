@@ -8,9 +8,11 @@ import { suggestProducts } from './deals'
 import { publishRows } from './publish'
 import { PLATFORM_LABEL, PLATFORM_ORDER, type Deal, type Job, type Listing, type Platform, type Post, type Product } from './types'
 import { daysUntil } from '../components/ProductRow'
+import type { Purchase } from './purchases'
 
 export type DealAsk = { deal: Deal; suggestion: { id: string; name: string } | null }
 export type PostGroup = { key: string; label: string; items: Product[] }
+export type PurchaseAsk = { product: Product; buys: Purchase[] }
 
 export const SAMPLE_SOURCES = ['amazon_sample', 'tiktok_sample', 'brand_direct'] as const
 export const isSample = (p: Pick<Product, 'source'>) => (SAMPLE_SOURCES as readonly string[]).includes(p.source)
@@ -32,6 +34,7 @@ export const tiktokDue = (p: Product) =>
 export interface Flow {
   asks: DealAsk[]
   reviews: { job: Job; product: Product }[]
+  purchaseAsks: PurchaseAsk[]    // a product with a sample deal AND an Amazon order: sample or bought?
   answers: number
   film: Product[]
   edit: Product[]
@@ -96,8 +99,16 @@ export function buildFlow(data: Snapshot): Flow {
     .map((p) => ({ product: p, lastPosted: postedOn.get(p.id)?.last ?? null, platforms: PLATFORM_ORDER.filter((pl) => postedOn.get(p.id)?.platforms.has(pl)) }))
     .sort((a, b) => (b.lastPosted ?? '').localeCompare(a.lastPosted ?? '') || a.product.name.localeCompare(b.product.name))
 
+  const askMap = new Map<string, Purchase[]>()
+  for (const pu of data.purchases ?? []) {
+    if (!pu.ask_product_id || pu.product_id) continue
+    if (!askMap.has(pu.ask_product_id)) askMap.set(pu.ask_product_id, [])
+    askMap.get(pu.ask_product_id)!.push(pu)
+  }
+  const purchaseAsks = [...askMap.entries()].map(([id, buys]) => ({ product: byId.get(id), buys })).filter((x): x is PurchaseAsk => Boolean(x.product))
+
   return {
-    asks, reviews, answers: asks.length + reviews.length, completed,
+    asks, reviews, purchaseAsks, answers: asks.length + reviews.length + purchaseAsks.length, completed,
     film: sorted.filter((p) => p.status === 'received' || p.status === 'expected'),
     edit: sorted.filter((p) => p.status === 'filmed' || p.status === 'editing'),
     post, postCount: ready.length, postDue: dueReady.length,
@@ -164,6 +175,34 @@ export const money = (n: number) => '$' + n.toLocaleString('en-US', { minimumFra
 export const moneyShort = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
 
 const sum = (items: Product[]) => items.reduce((n, p) => n + (p.price != null ? Number(p.price) : 0), 0)
+
+/**
+ * The price paid for bought products: the earliest linked Amazon order's unit price where there is one
+ * (else the product's price). Applied to a copy, so Stats for bought products reflects what was paid.
+ */
+export function withPaidPrices(products: Product[], purchases: Purchase[]): Product[] {
+  const paid = new Map<string, { date: string; price: number }>()
+  for (const pu of purchases) {
+    if (!pu.product_id || pu.link_kind !== 'bought' || pu.unit_price == null) continue
+    const have = paid.get(pu.product_id)
+    const d = pu.order_date ?? '9999'
+    if (!have || d < have.date) paid.set(pu.product_id, { date: d, price: Number(pu.unit_price) })
+  }
+  return products.map((p) => (p.source === 'bought' && paid.has(p.id) ? { ...p, price: paid.get(p.id)!.price } : p))
+}
+
+/** Supplies bought this year: total, by month, and the most repeated ASINs. */
+export function suppliesOf(purchases: Purchase[]) {
+  const y0 = yearStart()
+  const items = purchases.filter((p) => p.bucket === 'supplies' && (!p.order_date || p.order_date >= y0))
+  const total = items.reduce((n, p) => n + (p.unit_price ?? 0) * p.quantity, 0)
+  const months = Array.from({ length: new Date().getMonth() + 1 }, (_, i) => {
+    const mm = String(i + 1).padStart(2, '0')
+    const these = items.filter((p) => p.order_date?.slice(5, 7) === mm)
+    return { key: mm, label: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][i], value: these.reduce((n, p) => n + (p.unit_price ?? 0) * p.quantity, 0), count: these.length }
+  })
+  return { items, total, months }
+}
 
 /**
  * Products of one kind (samples / bought) and their value: this year by received date, plus the ones

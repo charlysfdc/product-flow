@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from './supabase'
 import { ACTIVE_DEAL_STATUSES, isHidden, quietCutoffIso, type Deal, type Job, type Listing, type Media, type Post, type Product, type ViralVueReminder } from './types'
 import { openReminders } from './viralvue'
+import type { Purchase } from './purchases'
 
 export interface Snapshot {
   products: Product[]    // in the flow (hidden ones left out)
@@ -14,10 +15,12 @@ export interface Snapshot {
   quiet: number          // waiting deals that went quiet (hidden)
   reminders: ViralVueReminder[]   // ticks to do by hand in ViralVue ([] before migration 0007)
   lastImport: string | null       // newest ViralVue deals import
+  purchases: Purchase[]           // Amazon purchases ([] before migration 0011)
 }
 
 // the last snapshot, so moving between Home, Products and the lists shows it at once while it refreshes
 let cached: Snapshot | null = null
+let channels = 0   // each useSnapshot has its own realtime channel (two on one screen must not share one)
 
 /** PostgREST filter for "still waiting": brand is talking, or messaged within 30 days. */
 export function stillWaitingFilter(): string {
@@ -31,7 +34,7 @@ export function useSnapshot() {
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const [p, l, po, j, d, w, wAll, vv, li] = await Promise.all([
+    const [p, l, po, j, d, w, wAll, vv, li, pu] = await Promise.all([
       supabase.from('products').select('*').order('name'),
       supabase.from('listings').select('id,product_id,platform,external_id,url,commission,availability,availability_note,checked_at'),
       supabase.from('posts').select('id,product_id,platform,status,external_id,title,url,posted_at,views,views_checked_at'),
@@ -41,6 +44,7 @@ export function useSnapshot() {
       supabase.from('deals').select('id', { count: 'exact', head: true }).eq('match_status', 'waiting'),
       openReminders(supabase),
       supabase.from('deals').select('imported_at').order('imported_at', { ascending: false }).limit(1),
+      supabase.from('purchases').select('id,order_id,order_date,asin,title,quantity,unit_price,category,bucket,bucket_by,product_id,link_kind,ask_product_id').order('order_date', { ascending: false }).limit(5000),
     ])
     // deals may not exist yet (migration 0002 pending): treat as empty
     const err = p.error ?? l.error ?? po.error ?? j.error
@@ -63,6 +67,7 @@ export function useSnapshot() {
       quiet: Math.max(0, (wAll.count ?? 0) - (w.count ?? 0)),
       reminders: vv.filter((r) => !r.deal?.product_id || !hiddenIds.has(r.deal.product_id)),
       lastImport: (li.data?.[0] as { imported_at?: string } | undefined)?.imported_at ?? null,
+      purchases: (pu.error ? [] : (pu.data ?? [])) as Purchase[],
     }
     setData(cached)
   }, [])
@@ -75,7 +80,7 @@ export function useSnapshot() {
       timer = window.setTimeout(load, 300)
     }
     const channel = supabase
-      .channel('home')
+      .channel(`home-${++channels}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, bump)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, bump)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, bump)

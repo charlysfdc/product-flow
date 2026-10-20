@@ -92,7 +92,14 @@ media.push(
   { id: 'mv12', product_id: 'p12', kind: 'finished_vertical', drive_file_id: 'dv12', filename: 'Blood Pressure Monitor - vertical (auto v1).mp4', duration_s: 35.5, width: 1080, height: 1920, shot_on: null, uploaded_by: null, size_bytes: 48_000_000, codec: null, uploaded_at: now },
   { id: 'mh12', product_id: 'p12', kind: 'finished_horizontal', drive_file_id: 'dh12', filename: 'Blood Pressure Monitor - horizontal (auto v1).mp4', duration_s: 116, width: 1920, height: 1080, shot_on: null, uploaded_by: null, size_bytes: 152_000_000, codec: null, uploaded_at: now },
 )
-const tables: Record<string, Record<string, unknown>[]> = { products, listings, posts, deals, jobs, media, viralvue_reminders: reminders, profiles: [] }
+const purchases: Record<string, unknown>[] = [
+  { id: 'pu1', order_id: '111-1', order_date: '2026-10-18', asin: 'B000MTST70', title: 'Red Bull Energy Drink, 8.4 fl oz, 24 cans', quantity: 2, unit_price: 38.18, category: 'Grocery & Gourmet Food', bucket: 'household', bucket_by: 'category', product_id: null, link_kind: null, ask_product_id: null },
+  { id: 'pu2', order_id: '111-2', order_date: '2026-09-08', asin: 'B0DHVGDL2F', title: 'Rectangle 3" x 2" Thermal Labels', quantity: 1, unit_price: 9.99, category: 'Office Products', bucket: 'supplies', bucket_by: 'category', product_id: null, link_kind: null, ask_product_id: null },
+  { id: 'pu3', order_id: '111-3', order_date: '2026-07-02', asin: 'B0DHVGDL2F', title: 'Rectangle 3" x 2" Thermal Labels', quantity: 1, unit_price: 9.99, category: 'Office Products', bucket: 'supplies', bucket_by: 'category', product_id: null, link_kind: null, ask_product_id: null },
+  { id: 'pu4', order_id: '111-4', order_date: '2026-06-11', asin: 'B0EUFYCAM1', title: 'eufy Security SoloCam S340, Solar Security Camera', quantity: 1, unit_price: 199.99, category: 'Electronics', bucket: 'review', bucket_by: 'claude', product_id: null, link_kind: null, ask_product_id: null },
+  { id: 'pu5', order_id: '111-5', order_date: '2026-05-03', asin: 'B0PLAUD001', title: 'PLAUD NotePen', quantity: 1, unit_price: 159, category: 'Electronics', bucket: 'review', bucket_by: 'match', product_id: null, link_kind: null, ask_product_id: 'p7' },
+]
+const tables: Record<string, Record<string, unknown>[]> = { products, listings, posts, deals, jobs, media, viralvue_reminders: reminders, purchases, profiles: [] }
 
 /** Phase 4: Claude's text and the finished file (a CORS + Range server on :8789 with v.mp4, h.mp4, 20 MB and 30 MB). */
 function demoPublish(body: Record<string, unknown>): Response {

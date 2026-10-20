@@ -4,7 +4,7 @@ import { useSnapshot } from '../lib/data'
 import type { Product } from '../lib/types'
 import { ProductRow } from '../components/ProductRow'
 import { IconGear } from '../components/Icons'
-import { buildFlow, fixups, moneyShort, valueOf } from '../lib/flow'
+import { buildFlow, fixups, moneyShort, valueOf, withPaidPrices } from '../lib/flow'
 
 const fmtDay = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : null)
 
@@ -26,8 +26,8 @@ export function Home() {
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [data, query, showHidden])
 
-  const samples = data ? valueOf(data.products, 'sample') : null
-  const bought = data ? valueOf(data.products, 'bought') : null
+  const samples = data ? valueOf(withPaidPrices(data.products, data.purchases), 'sample') : null
+  const bought = data ? valueOf(withPaidPrices(data.products, data.purchases), 'bought') : null
   const missingPrice = data ? fixups(data).price.length : 0
   const things = flow ? flow.answers + flow.due.length : 0
   const today = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })

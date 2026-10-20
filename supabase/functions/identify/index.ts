@@ -2,6 +2,7 @@
 //   { upc }                 barcode → UPC databases (name, brand, image, ASIN) → Amazon search by UPC for the ASIN
 //   { image, media_type }   photo of the packaging → Claude reads brand, product, variant (and a printed UPC)
 //   { url }                 Amazon or TikTok Shop link → page title, image, ASIN / product id
+//   { classify: [{ asin, title, category }] }   Amazon purchases: review candidate, supplies, household or subscription
 //   { search }              Find on Amazon: up to 5 Amazon US results for a product name (picture, title, price, ASIN)
 // The Amazon page logic is ported from Influencer-Workflow-Engine-Main amazon_utils.py,
 // including its r.jina.ai reader fallback for when Amazon shows a captcha.
@@ -582,7 +583,58 @@ async function byPhoto(image: string, mediaType: string): Promise<Identification
   return out
 }
 
+// ---- Amazon purchases: what kind of buy is this? ------------------------------------
+
+const BUCKETS = ['review', 'supplies', 'household', 'subscription'] as const
+
+const CLASSIFY_SYSTEM = `You sort a product reviewer's own Amazon purchases. Charly films honest review videos of products for Amazon and TikTok Shop, and also buys supplies for a craft and egg business and everyday things for the home.
+For each item pick one bucket:
+- review: a gadget, tool, device or product with a clear demo that would make a good review video (it is used and shown, not just used up). Not a consumable, not a refill, not clothing basics.
+- supplies: materials and tools for making things or running the business (craft blanks, vinyl, labels, packaging, printer supplies, office supplies, egg cartons).
+- household: consumables and everyday home or personal items (food, drinks, vitamins, cleaning, toiletries, pet food, clothing basics, refills).
+- subscription: digital items, memberships, audiobooks, apps, streaming.
+When unsure between review and household, prefer household.`
+
+async function classify(items: unknown): Promise<{ buckets: Record<string, string> }> {
+  const list = (Array.isArray(items) ? items : []).slice(0, 150).map((x) => {
+    const it = x as Record<string, unknown>
+    return { asin: String(it.asin ?? ''), title: String(it.title ?? '').slice(0, 200), category: String(it.category ?? '').slice(0, 120) }
+  }).filter((x) => /^[A-Z0-9]{10}$/.test(x.asin))
+  if (!list.length) return { buckets: {} }
+  const client = anthropic()
+  if (!client) throw new HttpError(500, 'Sorting purchases needs ANTHROPIC_API_KEY in the Supabase Edge Function secrets.')
+  const schema = {
+    type: 'object', additionalProperties: false, required: ['items'],
+    properties: { items: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['asin', 'bucket'], properties: { asin: { type: 'string' }, bucket: { type: 'string', enum: [...BUCKETS] } } } } },
+  }
+  // deno-lint-ignore no-explicit-any
+  const params: any = {
+    model: 'claude-haiku-5-5', max_tokens: 8000, system: CLASSIFY_SYSTEM,
+    betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
+    output_config: { format: { type: 'json_schema', schema } },
+    messages: [{ role: 'user', content: `Sort these purchases. Reply with JSON {"items": [{"asin", "bucket"}]} covering every item.\n${JSON.stringify(list)}` }],
+  }
+  let res
+  try {
+    res = await createRobust(client, params)
+  } catch (e) {
+    if (e instanceof Anthropic.APIError) throw new HttpError(502, `Claude could not sort the purchases (${e.status ?? 'error'}: ${apiMessage(e)}).`)
+    throw e
+  }
+  // deno-lint-ignore no-explicit-any
+  const text = (res.content as any[]).filter((b) => b.type === 'text').map((b) => b.text).join('')
+  const out: Record<string, string> = {}
+  try {
+    const j = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text)
+    for (const it of j.items ?? []) if ((BUCKETS as readonly string[]).includes(it.bucket)) out[String(it.asin)] = it.bucket
+  } catch {
+    throw new HttpError(502, 'Claude’s sorting could not be read; the purchases stay unsorted.')
+  }
+  return { buckets: out }
+}
+
 serve(async (body) => {
+  if (Array.isArray(body.classify)) return classify(body.classify)
   if (typeof body.search === 'string') return searchAmazon(body.search)
   if (typeof body.upc === 'string' && body.upc) return byUpc(body.upc)
   if (typeof body.url === 'string' && body.url) return byUrl(body.url.trim())

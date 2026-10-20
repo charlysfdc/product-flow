@@ -28,7 +28,7 @@ export function Products() {
         <div className="blocks">
           <Link to="/products/answers" className={'block' + (flow.answers ? ' block-ask' : '')}>
             <span className="block-big">{flow.answers}</span>
-            <span className="block-main"><b>Answers needed</b><small>{flow.reviews.length} edit{flow.reviews.length === 1 ? '' : 's'} to review · {flow.asks.length} deal question{flow.asks.length === 1 ? '' : 's'}</small></span>
+            <span className="block-main"><b>Answers needed</b><small>{flow.reviews.length} edit{flow.reviews.length === 1 ? '' : 's'} to review · {flow.asks.length} deal question{flow.asks.length === 1 ? '' : 's'}{flow.purchaseAsks.length ? ` · ${flow.purchaseAsks.length} sample or bought?` : ''}</small></span>
             <span className="chev" aria-hidden>›</span>
           </Link>
           <Link to="/products/film" className="block">
@@ -92,6 +92,15 @@ export function ProductList() {
                 <Link to={`/review/${job.id}`} className="row">
                   <Thumb src={product.product_image_url} name={product.name} />
                   <div className="row-main"><div className="row-title">{product.name}</div><div className="row-sub"><span>{job.question ?? 'Review the edit'}</span></div></div>
+                  <span className="chev" aria-hidden>›</span>
+                </Link>
+              </li>
+            ))}
+            {flow.purchaseAsks.map(({ product, buys }) => (
+              <li key={`pa-${product.id}`}>
+                <Link to={`/purchase-ask/${product.id}`} className="row">
+                  <Thumb src={product.product_image_url} name={product.name} />
+                  <div className="row-main"><div className="row-title">{product.name}</div><div className="row-sub"><span>Sample or bought?</span><span>brand deal + {buys.length} Amazon order{buys.length === 1 ? '' : 's'}</span></div></div>
                   <span className="chev" aria-hidden>›</span>
                 </Link>
               </li>

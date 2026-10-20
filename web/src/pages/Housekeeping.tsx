@@ -9,6 +9,7 @@ import { FIX_LABEL, fixups, type FixKind } from '../lib/flow'
 import { ARCHIVE_REASON_LABEL, type Product } from '../lib/types'
 import { ProductRow, Thumb } from '../components/ProductRow'
 import { FindAmazonSheet } from '../components/FindAmazon'
+import { PurchasesCard } from './Purchases'
 
 const fmtDay = (d: string | null | undefined) => (d ? new Date(d.length === 10 ? d + 'T00:00:00' : d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'never')
 
@@ -25,12 +26,7 @@ export function Housekeeping() {
 
       <ImportCard lastDeals={data?.lastImport ?? null} lastViews={lastViews} onDone={reload} />
 
-      <section>
-        <div className="card">
-          <div className="hk-head"><span className="card-title">Import Amazon purchases</span><span className="chip chip-sm">Coming later</span></div>
-          <p className="muted small">Amazon only offers “Request Your Data”, which takes a few days to arrive. When it does, the order file will fill in what you paid for bought products.</p>
-        </div>
-      </section>
+      <PurchasesCard data={data} onDone={reload} />
 
       <section>
         <h2>Fix-ups</h2>

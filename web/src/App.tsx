@@ -13,6 +13,7 @@ import { Publish } from './pages/Publish'
 import { ProductList, Products } from './pages/Products'
 import { StatDetail, StatGaps, Stats } from './pages/Stats'
 import { FixList, HiddenPage, Housekeeping } from './pages/Housekeeping'
+import { PurchaseAsk, PurchaseChanges, PurchasesPage } from './pages/Purchases'
 import { UploadBar } from './components/Clips'
 
 function Gate() {
@@ -40,6 +41,9 @@ function Gate() {
       <Route path="/housekeeping" element={<Housekeeping />} />
       <Route path="/housekeeping/fix/:kind" element={<FixList />} />
       <Route path="/housekeeping/hidden" element={<HiddenPage />} />
+      <Route path="/housekeeping/purchases" element={<PurchasesPage />} />
+      <Route path="/housekeeping/changes" element={<PurchaseChanges />} />
+      <Route path="/purchase-ask/:productId" element={<PurchaseAsk />} />
       <Route path="*" element={<Home />} />
     </Routes>
     <UploadBar />

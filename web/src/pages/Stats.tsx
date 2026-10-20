@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useDealStats, useSnapshot } from '../lib/data'
-import { buildFlow, daysToPosted, money, moneyShort, valueOf } from '../lib/flow'
+import { buildFlow, daysToPosted, money, moneyShort, suppliesOf, valueOf, withPaidPrices } from '../lib/flow'
 import { SOURCE_LABEL, fmtPrice, parsePrice, type Post, type Product } from '../lib/types'
 import { supabase } from '../lib/supabase'
 import { saveReceived } from '../lib/received'
 import { FindAmazonSheet } from '../components/FindAmazon'
+import { byAsinGroups } from '../lib/purchases'
 import { Thumb } from '../components/ProductRow'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -68,8 +69,8 @@ export function Stats() {
   if (error) return <main><Link to="/" className="back">‹ Home</Link><p className="error">{error}</p></main>
   if (!data || !flow) return <main><Link to="/" className="back">‹ Home</Link><p className="muted">Loading…</p></main>
 
-  const s = valueOf(data.products, 'sample')
-  const b = valueOf(data.products, 'bought')
+  const s = valueOf(withPaidPrices(data.products, data.purchases), 'sample')
+  const b = valueOf(withPaidPrices(data.products, data.purchases), 'bought')
   const days = daysToPosted(data.products, data.posts)
   const posted = data.products.filter((p) => p.status === 'done').length
   const total = data.products.length || 1
@@ -106,6 +107,19 @@ export function Stats() {
           </Link>
           <Gaps kind="bought" v={b} />
         </div>
+        {data.purchases.length > 0 && (() => {
+          const sup = suppliesOf(data.purchases)
+          const top = byAsinGroups(sup.items).sort((a, c) => c.count - a.count || c.total - a.total).slice(0, 3)
+          return (
+            <Link to="/stats/supplies" className="stat">
+              <span className="stat-head"><b>Supplies</b><span className="chev" aria-hidden>›</span></span>
+              <span className="stat-big stat-mid">{money(sup.total)}</span>
+              <small>{sup.items.length} orders this year · craft, business and office supplies from your Amazon purchases</small>
+              <Bars months={sup.months} />
+              {top.length > 0 && <span className="stat-top">{top.map((g) => <span key={g.asin}><span>{g.title ?? g.asin}</span><b>{g.count}×</b></span>)}</span>}
+            </Link>
+          )
+        })()}
         <Link to="/stats/pipeline" className="stat">
           <span className="stat-head"><b>Pipeline</b><span className="chev" aria-hidden>›</span></span>
           <span className="stack" role="img" aria-label={stages.map((x) => `${x.n} ${x.label}`).join(', ')}>
@@ -135,7 +149,7 @@ export function Stats() {
   )
 }
 
-const DETAIL_TITLE: Record<string, string> = { sample: 'Sample product value', bought: 'Bought product value', pipeline: 'Pipeline', deals: 'Brand deals', views: 'Amazon video views' }
+const DETAIL_TITLE: Record<string, string> = { sample: 'Sample product value', bought: 'Bought product value', supplies: 'Supplies', pipeline: 'Pipeline', deals: 'Brand deals', views: 'Amazon video views' }
 
 /** One Stats block in full. */
 export function StatDetail() {
@@ -150,7 +164,7 @@ export function StatDetail() {
   if (!data || !flow) return <main>{head}<p className="muted">Loading…</p></main>
 
   if (kind === 'sample' || kind === 'bought') {
-    const v = valueOf(data.products, kind)
+    const v = valueOf(withPaidPrices(data.products, data.purchases), kind)
     const months = byMonth(v.year)
     const pool = month === 'all' ? v.items : month === 'unknown' ? v.unknown : month === 'earlier' ? v.earlier : v.year.filter((p) => p.received_at?.slice(5, 7) === month)
     const items = [...pool]
@@ -183,6 +197,33 @@ export function StatDetail() {
           </ul>
         )}
         <p className="muted small page-sub">Highest value first. Tap one to open it and fix its price or source.</p>
+      </main>
+    )
+  }
+
+  if (kind === 'supplies') {
+    const sup = suppliesOf(data.purchases)
+    const pool = month === 'all' ? sup.items : sup.items.filter((p) => p.order_date?.slice(5, 7) === month)
+    const groups = byAsinGroups(pool).sort((a, b) => b.total - a.total)
+    return (
+      <main>
+        {head}
+        <p className="stat-hero"><b>{money(pool.reduce((n, p) => n + (p.unit_price ?? 0) * p.quantity, 0))}</b><span className="muted">{pool.length} order{pool.length === 1 ? "" : "s"} · {groups.length} different item{groups.length === 1 ? "" : "s"}</span></p>
+        <div className="month-chips" role="group" aria-label="Month">
+          <button aria-pressed={month === 'all'} onClick={() => setMonth('all')}>This year</button>
+          {sup.months.map((m) => <button key={m.key} aria-pressed={month === m.key} className={m.count ? '' : 'chip-empty'} onClick={() => setMonth(m.key)}>{m.label}</button>)}
+        </div>
+        {groups.length === 0 ? <p className="empty">No supplies that month.</p> : (
+          <ul className="list">
+            {groups.map((g) => (
+              <li key={g.asin} className="row">
+                <div className="row-main"><div className="row-title">{g.title ?? g.asin}</div><div className="row-sub"><span>{g.count} order{g.count === 1 ? '' : 's'}{g.qty > g.count ? ` · ${g.qty} pieces` : ''}</span>{g.last && <span>last {fmtDay(g.last)}</span>}</div></div>
+                <b className="price">{money(g.total)}</b>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="muted small page-sub">From Housekeeping → Import Amazon purchases. Move a purchase to another bucket in Housekeeping → Purchases.</p>
       </main>
     )
   }
@@ -273,7 +314,7 @@ export function StatGaps() {
   const back = <><Link to={`/stats/${which}`} className="back">‹ {DETAIL_TITLE[which]}</Link><h1>{gap === 'undated' ? 'Without a date' : 'Without a price'}</h1></>
   if (error) return <main>{back}<p className="error">{error}</p></main>
   if (!data) return <main>{back}<p className="muted">Loading…</p></main>
-  const v = valueOf(data.products, which)
+  const v = valueOf(withPaidPrices(data.products, data.purchases), which)
   const items = (gap === 'undated' ? v.undated : v.unpriced).slice().sort((a, b) => a.name.localeCompare(b.name))
   return (
     <main>

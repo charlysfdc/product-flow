@@ -19,6 +19,7 @@ import { unlinkDeal } from '../lib/deals'
 import { markPosted, platformList, publishRows } from '../lib/publish'
 import { ProductReminders } from '../components/ViralVue'
 import { StageBar } from '../components/Stages'
+import { FindAmazonSheet } from '../components/FindAmazon'
 import type { Deal } from '../lib/types'
 
 function fmtDate(d: string | null) {
@@ -51,6 +52,7 @@ type SheetKind =
   | { kind: 'hide' }
   | { kind: 'film' }
   | { kind: 'price' }
+  | { kind: 'amazon' }
   | null
 
 export function ProductPage() {
@@ -317,6 +319,9 @@ export function ProductPage() {
         <button className={`chip chip-btn status-${p.status}`} onClick={() => setSheet({ kind: 'status' })}>{STATUS_LABEL[p.status]} ▾</button>
         <button className={'chip chip-btn' + (p.source === 'unknown' ? ' chip-ask' : '')} onClick={() => setSheet({ kind: 'source' })}>{SOURCE_LABEL[p.source]} ▾</button>
         <button className={'chip chip-btn' + (fmtPrice(p.price) ? '' : ' chip-add')} onClick={() => setSheet({ kind: 'price' })}>{fmtPrice(p.price) ?? 'Add price'}</button>
+        {(!p.product_image_url || !listings.some((l) => l.platform === 'amazon_us')) && (
+          <button className="chip chip-btn chip-add" onClick={() => setSheet({ kind: 'amazon' })}>Find on Amazon</button>
+        )}
         {due && <span className="chip chip-due">{due}</span>}
         {totalViews > 0 && <span className="chip">{totalViews.toLocaleString()} views</span>}
         {folderUrl
@@ -473,6 +478,7 @@ export function ProductPage() {
       <section>
         <h2>Housekeeping</h2>
         <div className="actions">
+          <button className="secondary" onClick={() => setSheet({ kind: 'amazon' })}>Find on Amazon</button>
           <button className="secondary" onClick={() => setSheet({ kind: 'merge' })}>Merge into…</button>
           {!p.archived_at && <button className="secondary" onClick={() => setSheet({ kind: 'hide' })}>Not a product review</button>}
         </div>
@@ -549,6 +555,10 @@ export function ProductPage() {
           onClose={close}
           onStarted={(_job, warning) => { close(); if (warning) setActionError(warning); reload() }}
         />
+      )}
+
+      {sheet?.kind === 'amazon' && (
+        <FindAmazonSheet product={p} hasAmazonListing={listings.some((l) => l.platform === 'amazon_us')} onClose={close} onDone={reload} />
       )}
 
       {sheet?.kind === 'price' && (

@@ -8,6 +8,7 @@ import { restoreProduct } from '../lib/functions'
 import { FIX_LABEL, fixups, type FixKind } from '../lib/flow'
 import { ARCHIVE_REASON_LABEL, type Product } from '../lib/types'
 import { ProductRow, Thumb } from '../components/ProductRow'
+import { FindAmazonSheet } from '../components/FindAmazon'
 
 const fmtDay = (d: string | null | undefined) => (d ? new Date(d.length === 10 ? d + 'T00:00:00' : d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'never')
 
@@ -152,9 +153,13 @@ function ImportCard({ lastDeals, lastViews, onDone }: { lastDeals: string | null
 /** One fix-up list; each row opens the Product screen to fix it. */
 export function FixList() {
   const { kind = 'price' } = useParams()
-  const { data, error } = useSnapshot()
+  const { data, error, reload } = useSnapshot()
   const fix = useMemo(() => (data ? fixups(data) : null), [data])
   const k = (kind in FIX_LABEL ? kind : 'price') as FixKind
+  // Missing details: work through the list; after each one the sheet opens the next
+  const [queue, setQueue] = useState<{ ids: string[]; at: number } | null>(null)
+  const current = queue && data ? data.products.find((p) => p.id === queue.ids[queue.at]) ?? null : null
+  const next = () => setQueue((q) => (q && q.at + 1 < q.ids.length ? { ...q, at: q.at + 1 } : null))
   return (
     <main>
       <Link to="/housekeeping" className="back">‹ Housekeeping</Link>
@@ -168,8 +173,34 @@ export function FixList() {
             <ul className="list">{g.items.map((p) => <ProductRow key={p.id} product={p} showStatus />)}</ul>
           </section>
         ))
-      ) : fix[k].length === 0 ? <p className="empty">Nothing to fix.</p> : (
+      ) : fix[k].length === 0 ? <p className="empty">Nothing to fix.</p> : k === 'details' ? (
+        <ul className="list">
+          {fix.details.map((p, i) => {
+            const onAmazon = data!.listings.some((l) => l.product_id === p.id && l.platform === 'amazon_us')
+            return (
+              <li key={p.id} className="fix-row">
+                <Link to={`/product/${p.id}`} state={{ from: '/housekeeping/fix/details' }} className="row">
+                  <Thumb src={p.product_image_url} name={p.name} />
+                  <div className="row-main"><div className="row-title">{p.name}</div><div className="row-sub">{[!p.product_image_url && 'No picture', !onAmazon && 'No Amazon listing'].filter(Boolean).map((t) => <span key={String(t)}>{t}</span>)}</div></div>
+                </Link>
+                <button className="secondary fix-btn" onClick={() => setQueue({ ids: fix.details.map((x) => x.id), at: i })}>Find on Amazon</button>
+              </li>
+            )
+          })}
+        </ul>
+      ) : (
         <ul className="list">{fix[k].map((p) => <ProductRow key={p.id} product={p} showStatus />)}</ul>
+      )}
+      {current && queue && (
+        <FindAmazonSheet
+          key={current.id}
+          product={current}
+          hasAmazonListing={data!.listings.some((l) => l.product_id === current.id && l.platform === 'amazon_us')}
+          onClose={() => setQueue(null)}
+          onDone={reload}
+          onNext={next}
+          nextLabel={queue.at + 1 < queue.ids.length ? 'Next product' : 'Finish'}
+        />
       )}
     </main>
   )

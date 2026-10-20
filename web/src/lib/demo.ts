@@ -191,6 +191,11 @@ export const demoFetch: typeof fetch = async (input, init) => {
   if (url.pathname.startsWith('/functions/v1/')) {
     await new Promise((r) => setTimeout(r, 900))
     const body = JSON.parse(String(init?.body ?? '{}'))
+    if (url.pathname.endsWith('/identify') && body.search) return json({ via: 'amazon', note: null, candidates: [
+      { asin: 'B0FRRQL4R8', title: 'SVA Rosehip Seed Carrier Oil, Huge Bottle, Large Size, 16 Fl Oz (473 ml)', brand: null, image_url: 'https://m.media-amazon.com/images/I/61KuiOq16JL._AC_SL1500_.jpg', price: 29.99, url: 'https://www.amazon.com/dp/B0FRRQL4R8' },
+      { asin: 'B071ZMQ3X8', title: 'SVA Rosehip Seed Carrier Oil, Glass Bottle with Dropper, 4 Fl Oz (118 ml)', brand: null, image_url: 'https://m.media-amazon.com/images/I/61DmZDzSPQL._AC_SL1500_.jpg', price: 9.99, url: 'https://www.amazon.com/dp/B071ZMQ3X8' },
+    ] })
+    if (url.pathname.endsWith('/identify') && body.url) return json({ name: 'SVA Rosehip Seed Carrier Oil', brand: 'SVA ORGANICS', variant: null, upc: null, asin: String(body.url).match(/dp\/([A-Z0-9]{10})/)?.[1] ?? 'B0FRRQL4R8', title: 'SVA Rosehip Seed Carrier Oil, Huge Bottle, 16 Fl Oz', image_url: 'https://m.media-amazon.com/images/I/61KuiOq16JL._AC_SL1500_.jpg', url: body.url, platform: 'amazon', tiktok_product_id: null, confidence: 'high', note: null, price: 29.99 })
     if (url.pathname.endsWith('/identify')) return json({ name: 'Nextorch P91 Flashlight', brand: 'NEXTORCH', variant: 'Black', upc: body.upc ?? null, asin: null, title: 'NEXTORCH P91 Tactical Flashlight', image_url: null, url: body.url ?? null, platform: null, tiktok_product_id: null, confidence: 'high', note: null })
     if (url.pathname.endsWith('/edit')) return demoEdit(body)
     if (url.pathname.endsWith('/publish')) return demoPublish(body)

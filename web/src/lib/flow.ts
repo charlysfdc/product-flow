@@ -122,9 +122,10 @@ export function editLabel(j: Job | undefined): string | null {
 
 // ---- Housekeeping fix-ups --------------------------------------------------
 
-export type FixKind = 'price' | 'source' | 'drive' | 'dupes'
+export type FixKind = 'details' | 'price' | 'source' | 'drive' | 'dupes'
 
 export const FIX_LABEL: Record<FixKind, { title: string; help: string }> = {
+  details: { title: 'Missing details', help: 'No picture or no Amazon listing. Find on Amazon fills the picture, brand, price and ASIN; after each one it moves on to the next.' },
   price: { title: 'Missing a price', help: 'Tap one and add what it costs (US $) on its Product screen.' },
   source: { title: 'Missing a source', help: 'Where it came from decides where it must be posted; set it on the Product screen.' },
   drive: { title: 'No Drive folder', help: 'Open one and tap Make Drive folder.' },
@@ -145,7 +146,9 @@ export function fixups(data: Snapshot): Record<FixKind, Product[]> & { dupeGroup
   const dupeGroups = [...byAsin.entries()].filter(([, ids]) => ids.size > 1)
     .map(([asin, ids]) => ({ asin, items: [...ids].map((id) => byId.get(id)!).sort((a, b) => a.name.localeCompare(b.name)) }))
   const name = (a: Product, b: Product) => a.name.localeCompare(b.name)
+  const onAmazon = new Set(listings.filter((l) => l.platform === 'amazon_us').map((l) => l.product_id))
   return {
+    details: products.filter((p) => !p.product_image_url || !onAmazon.has(p.id)).sort(name),
     price: products.filter((p) => p.price == null).sort(name),
     source: products.filter((p) => p.source === 'unknown').sort(name),
     drive: products.filter((p) => !p.drive_folder_id).sort(name),

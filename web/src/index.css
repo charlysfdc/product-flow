@@ -528,3 +528,10 @@ a.add-btn { color: #fff; }
 .amz-pick { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px; }
 .amz-fills { margin: 0 0 10px; padding-left: 20px; }
 .amz-fills li { margin: 2px 0; }
+.stat-link { display: flex; flex-direction: column; gap: 8px; color: var(--text); }
+.gaps a { font-weight: 700; }
+.gap-row { padding-bottom: 10px; }
+.gap-row .row { padding-bottom: 6px; }
+.gap-fix { display: flex; gap: 8px; align-items: center; padding: 0 16px; flex-wrap: wrap; }
+.gap-fix input { font: inherit; font-size: 16px; padding: 9px 11px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--text); width: 9.5em; }
+.gap-fix .secondary { padding: 9px 12px; font-size: 14px; }

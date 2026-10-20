@@ -163,12 +163,27 @@ export const yearStart = () => `${new Date().getFullYear()}-01-01`
 export const money = (n: number) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 export const moneyShort = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
 
-/** Products of one kind (samples / bought) received this year, and their value. */
+const sum = (items: Product[]) => items.reduce((n, p) => n + (p.price != null ? Number(p.price) : 0), 0)
+
+/**
+ * Products of one kind (samples / bought) and their value: this year by received date, plus the ones
+ * with no date ("Date unknown"), never dropped; earlier years kept apart. Gaps: no price, no date.
+ */
 export function valueOf(products: Product[], which: 'sample' | 'bought') {
   const y0 = yearStart()
-  const items = products.filter((p) => (which === 'sample' ? isSample(p) : p.source === 'bought') && p.received_at && p.received_at >= y0)
-  const value = items.reduce((n, p) => n + (p.price != null ? Number(p.price) : 0), 0)
-  return { items, value, priced: items.filter((p) => p.price != null).length }
+  const all = products.filter((p) => (which === 'sample' ? isSample(p) : p.source === 'bought'))
+  const year = all.filter((p) => p.received_at && p.received_at >= y0)
+  const unknown = all.filter((p) => !p.received_at)
+  const earlier = all.filter((p) => p.received_at && p.received_at < y0)
+  const items = [...year, ...unknown]          // what the block counts: this year + date unknown
+  return {
+    all, year, unknown, earlier, items,
+    value: sum(items), yearValue: sum(year), unknownValue: sum(unknown), earlierValue: sum(earlier),
+    priced: items.filter((p) => p.price != null).length,
+    unpriced: all.filter((p) => p.price == null),
+    undated: unknown,
+    estimated: all.filter((p) => p.received_estimated).length,
+  }
 }
 
 /** Average days from arrival to the first post, over products that have both. */

@@ -19,8 +19,8 @@ const products = [
   P('p6', 'Nextorch P82C Flashlight', { brand: 'NEXTORCH', status: 'filmed', received_at: '2026-09-26', drive_folder_id: 'x6', drive_folder_name: 'Nextorch P82C Flashlight' }),
   P('p7', 'Plaud Notepen', { brand: 'Plaud', status: 'editing', drive_folder_id: 'x7' }),
   P('p8', 'Castor Oil', { brand: 'Sky Organics', status: 'editing', drive_folder_id: 'x8', deadline: inDays(1) }),
-  P('p9', 'Flashforge AD5X', { brand: 'Flashforge', status: 'ready' }),
-  P('p10', 'Eufy Robot Vacuum', { brand: 'Eufy', status: 'done' }),
+  P('p9', 'Flashforge AD5X', { brand: 'Flashforge', status: 'ready', source: 'bought', received_at: null, price: 289 }),
+  P('p10', 'Eufy Robot Vacuum', { brand: 'Eufy', status: 'done', received_at: '2026-07-05', received_estimated: true }),
   P('p13', 'IMG_2231 kitchen', { status: 'ready', source: 'unknown', drive_folder_id: 'x13' }),
   P('p12', 'Blood Pressure Monitor', { brand: 'Omron', price: 39.99, status: 'ready', drive_folder_id: 'x12', received_at: '2026-10-02' }),
 ]

@@ -11,7 +11,7 @@ import { Review } from './pages/Review'
 import { Script } from './pages/Script'
 import { Publish } from './pages/Publish'
 import { ProductList, Products } from './pages/Products'
-import { StatDetail, Stats } from './pages/Stats'
+import { StatDetail, StatGaps, Stats } from './pages/Stats'
 import { FixList, HiddenPage, Housekeeping } from './pages/Housekeeping'
 import { UploadBar } from './components/Clips'
 
@@ -36,6 +36,7 @@ function Gate() {
       <Route path="/products/:list" element={<ProductList />} />
       <Route path="/stats" element={<Stats />} />
       <Route path="/stats/:kind" element={<StatDetail />} />
+      <Route path="/stats/:kind/:gap" element={<StatGaps />} />
       <Route path="/housekeeping" element={<Housekeeping />} />
       <Route path="/housekeeping/fix/:kind" element={<FixList />} />
       <Route path="/housekeeping/hidden" element={<HiddenPage />} />

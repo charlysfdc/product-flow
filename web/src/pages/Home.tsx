@@ -97,7 +97,7 @@ export function Home() {
             <Link to="/stats" className="tile-half">
               <span className="tile-eyebrow tile-eyebrow-dark">Stats</span>
               <b>{moneyShort(samples!.value)}</b>
-              <span>in samples this year</span>
+              <span>in samples this year (and undated)</span>
               <span className="tile-foot">Bought <b>{moneyShort(bought!.value)}</b></span>
             </Link>
             <Link to="/housekeeping" className="tile-half">

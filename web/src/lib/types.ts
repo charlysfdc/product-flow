@@ -18,6 +18,7 @@ export interface Product {
   drive_folder_name: string | null
   extra_drive_folders?: { id: string | null; name: string | null }[]   // migration 0004
   post_copy?: PostCopy | null                                          // migration 0007
+  received_estimated?: boolean                                         // migration 0010: received_at was estimated from the clips
   price?: number | null                                                // migration 0009: US dollars, for taxes later
   archived_at?: string | null                                          // migration 0008: hidden from the flow
   archived_reason?: string | null

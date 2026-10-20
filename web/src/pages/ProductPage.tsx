@@ -20,6 +20,7 @@ import { markPosted, platformList, publishRows } from '../lib/publish'
 import { ProductReminders } from '../components/ViralVue'
 import { StageBar } from '../components/Stages'
 import { FindAmazonSheet } from '../components/FindAmazon'
+import { saveReceived } from '../lib/received'
 import type { Deal } from '../lib/types'
 
 function fmtDate(d: string | null) {
@@ -53,6 +54,7 @@ type SheetKind =
   | { kind: 'film' }
   | { kind: 'price' }
   | { kind: 'amazon' }
+  | { kind: 'received' }
   | null
 
 export function ProductPage() {
@@ -243,7 +245,9 @@ export function ProductPage() {
   type Step = { key: string; label: string; detail?: string | null; when?: string | null; ok: boolean; onTap?: () => void }
   const steps: Step[] = [
     ...(messaged ? [{ key: 'msg', label: `Messaged ${messaged.brand ?? 'the brand'}`, detail: 'through ViralVue', when: fmtShort(messaged.message_sent_at), ok: true }] : []),
-    { key: 'arrived', label: p.status === 'expected' ? 'Arrives' : 'Arrived', detail: SOURCE_LABEL[p.source] === SOURCE_LABEL.unknown ? null : SOURCE_LABEL[p.source], when: fmtShort(p.received_at), ok: reached('received'), onTap: () => setSheet({ kind: 'status' }) },
+    { key: 'arrived', label: p.status === 'expected' ? 'Arrives' : 'Arrived',
+      detail: [SOURCE_LABEL[p.source] === SOURCE_LABEL.unknown ? null : SOURCE_LABEL[p.source], p.received_estimated ? 'date estimated' : !p.received_at && p.status !== 'expected' ? 'Tap to set the date' : null].filter(Boolean).join(' · ') || null,
+      when: p.received_at ? `${p.received_estimated ? '≈ ' : ''}${fmtShort(p.received_at)}` : null, ok: reached('received'), onTap: () => setSheet({ kind: 'received' }) },
     { key: 'filmed', label: 'Filmed', detail: reached('filmed') ? null : 'Clips go in /raw', ok: reached('filmed'), onTap: () => setSheet({ kind: 'status' }) },
     { key: 'edited', label: 'Edited', detail: reached('ready') ? null : 'Finished video goes in /finished', ok: reached('ready'), onTap: () => setSheet({ kind: 'status' }) },
     ...checklist.map((c) => {
@@ -418,7 +422,7 @@ export function ProductPage() {
             {p.brand && <><dt>Brand</dt><dd>{p.brand}</dd></>}
             {p.variant && <><dt>Variant</dt><dd>{p.variant}</dd></>}
             {p.upc && <><dt>Barcode</dt><dd>{p.upc}</dd></>}
-            {p.received_at && <><dt>Received</dt><dd>{fmtDate(p.received_at)}</dd></>}
+            <dt>Received</dt><dd><button className="link" style={{ padding: 0 }} onClick={() => setSheet({ kind: 'received' })}>{p.received_at ? `${p.received_estimated ? '≈ ' : ''}${fmtDate(p.received_at)}${p.received_estimated ? ' (estimated)' : ''}` : 'Add the date'}</button></dd>
             {p.deadline && <><dt>Deadline</dt><dd>{fmtDate(p.deadline)}</dd></>}
             <dt>Status</dt><dd>{STATUS_HELP[p.status]}</dd>
           </dl>
@@ -557,6 +561,19 @@ export function ProductPage() {
         />
       )}
 
+      {sheet?.kind === 'received' && (
+        <ReceivedSheet
+          product={p}
+          busy={busy}
+          onClose={close}
+          onSave={(date) => run('Saving the date', async () => {
+            const { error } = await saveReceived(p.id, date)
+            if (error) throw new Error(error.message)
+            close()
+          })}
+        />
+      )}
+
       {sheet?.kind === 'amazon' && (
         <FindAmazonSheet product={p} hasAmazonListing={listings.some((l) => l.platform === 'amazon_us')} onClose={close} onDone={reload} />
       )}
@@ -660,6 +677,25 @@ function PostSheet({ platform, posts, busy, onSave, onRemove, onClose }: {
         {appPost && (
           <button type="button" className="link" onClick={() => onRemove(appPost)} disabled={busy}>Not posted after all</button>
         )}
+      </form>
+    </Sheet>
+  )
+}
+
+function ReceivedSheet({ product, busy, onSave, onClose }: { product: Product; busy: boolean; onSave: (date: string | null) => void; onClose: () => void }) {
+  const [date, setDate] = useState(product.received_at ?? '')
+  return (
+    <Sheet title="When did it arrive?" onClose={onClose}>
+      <p className="muted small">
+        {product.received_estimated
+          ? `≈ ${fmtDate(product.received_at)} was estimated from the earliest clip in Drive. Set the real day and it stops being an estimate.`
+          : 'The day the box arrived. Stats counts it in this month.'}
+      </p>
+      <form className="form" onSubmit={(e) => { e.preventDefault(); onSave(date || null) }}>
+        <label>Arrived on
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <button className="primary" type="submit" disabled={busy || (!date && !product.received_at)}>{date ? 'Save' : 'Remove the date'}</button>
       </form>
     </Sheet>
   )

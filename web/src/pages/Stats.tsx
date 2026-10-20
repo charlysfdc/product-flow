@@ -1,8 +1,11 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useDealStats, useSnapshot } from '../lib/data'
-import { buildFlow, daysToPosted, money, valueOf } from '../lib/flow'
-import { SOURCE_LABEL, fmtPrice, type Post, type Product } from '../lib/types'
+import { buildFlow, daysToPosted, money, moneyShort, valueOf } from '../lib/flow'
+import { SOURCE_LABEL, fmtPrice, parsePrice, type Post, type Product } from '../lib/types'
+import { supabase } from '../lib/supabase'
+import { saveReceived } from '../lib/received'
+import { FindAmazonSheet } from '../components/FindAmazon'
 import { Thumb } from '../components/ProductRow'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -31,6 +34,27 @@ function Bars({ months }: { months: { label: string; value: number }[] }) {
         </span>
       ))}
     </div>
+  )
+}
+
+type Value = ReturnType<typeof valueOf>
+
+/** "$X this year · $Y date unknown (· $Z earlier years)". */
+const splitLine = (v: Value) => [
+  `${moneyShort(v.yearValue)} this year`,
+  v.unknown.length ? `${moneyShort(v.unknownValue)} date unknown` : null,
+  v.earlier.length ? `${moneyShort(v.earlierValue)} earlier years` : null,
+].filter(Boolean).join(' · ')
+
+/** "45 products · 42 without a price · 40 without a date", each gap a link to its list. */
+function Gaps({ kind, v }: { kind: 'sample' | 'bought'; v: Value }) {
+  return (
+    <small className="gaps">
+      {v.all.length} product{v.all.length === 1 ? '' : 's'}
+      {v.unpriced.length > 0 && <> · <Link to={`/stats/${kind}/unpriced`}>{v.unpriced.length} without a price</Link></>}
+      {v.undated.length > 0 && <> · <Link to={`/stats/${kind}/undated`}>{v.undated.length} without a date</Link></>}
+      {v.estimated > 0 && <> · {v.estimated} date{v.estimated === 1 ? '' : 's'} estimated</>}
+    </small>
   )
 }
 
@@ -65,17 +89,23 @@ export function Stats() {
       <h1>Stats</h1>
       <p className="muted page-sub">{new Date().getFullYear()} so far · values by received date</p>
       <div className="blocks">
-        <Link to="/stats/sample" className="stat">
-          <span className="stat-head"><b>Sample product value</b><span className="chev" aria-hidden>›</span></span>
-          <span className="stat-big">{money(s.value)}</span>
-          <small>{s.items.length} samples (Amazon, TikTok Shop, brand direct){s.items.length > s.priced ? ` · ${s.items.length - s.priced} without a price` : ''}</small>
-          <Bars months={byMonth(s.items)} />
-        </Link>
-        <Link to="/stats/bought" className="stat">
-          <span className="stat-head"><b>Bought product value</b><span className="chev" aria-hidden>›</span></span>
-          <span className="stat-big stat-mid">{money(b.value)}</span>
-          <small>{b.items.length} product{b.items.length === 1 ? '' : 's'} you paid for yourself{b.items.length > b.priced ? ` · ${b.items.length - b.priced} without a price` : ''}</small>
-        </Link>
+        <div className="stat">
+          <Link to="/stats/sample" className="stat-link">
+            <span className="stat-head"><b>Sample product value</b><span className="chev" aria-hidden>›</span></span>
+            <span className="stat-big">{money(s.value)}</span>
+            <small>{splitLine(s)} · Amazon, TikTok Shop and brand-direct samples</small>
+            <Bars months={[...byMonth(s.year), ...(s.unknown.length ? [{ label: '?', value: s.unknownValue }] : [])]} />
+          </Link>
+          <Gaps kind="sample" v={s} />
+        </div>
+        <div className="stat">
+          <Link to="/stats/bought" className="stat-link">
+            <span className="stat-head"><b>Bought product value</b><span className="chev" aria-hidden>›</span></span>
+            <span className="stat-big stat-mid">{money(b.value)}</span>
+            <small>{splitLine(b)} · paid for yourself</small>
+          </Link>
+          <Gaps kind="bought" v={b} />
+        </div>
         <Link to="/stats/pipeline" className="stat">
           <span className="stat-head"><b>Pipeline</b><span className="chev" aria-hidden>›</span></span>
           <span className="stack" role="img" aria-label={stages.map((x) => `${x.n} ${x.label}`).join(', ')}>
@@ -121,8 +151,9 @@ export function StatDetail() {
 
   if (kind === 'sample' || kind === 'bought') {
     const v = valueOf(data.products, kind)
-    const months = byMonth(v.items)
-    const items = (month === 'all' ? v.items : v.items.filter((p) => p.received_at?.slice(5, 7) === month))
+    const months = byMonth(v.year)
+    const pool = month === 'all' ? v.items : month === 'unknown' ? v.unknown : month === 'earlier' ? v.earlier : v.year.filter((p) => p.received_at?.slice(5, 7) === month)
+    const items = [...pool]
       .sort((a, b) => (b.price ?? -1) - (a.price ?? -1) || a.name.localeCompare(b.name))
     const value = items.reduce((n, p) => n + (p.price != null ? Number(p.price) : 0), 0)
     const unpriced = items.filter((p) => p.price == null).length
@@ -130,9 +161,13 @@ export function StatDetail() {
       <main>
         {head}
         <p className="stat-hero"><b>{money(value)}</b><span className="muted">{items.length} product{items.length === 1 ? '' : 's'}{unpriced ? `, ${unpriced} without a price` : ''}</span></p>
+        <p className="muted small page-sub">{splitLine(v)}</p>
+        <p className="page-sub"><Gaps kind={kind} v={v} /></p>
         <div className="month-chips" role="group" aria-label="Month">
-          <button aria-pressed={month === 'all'} onClick={() => setMonth('all')}>All year</button>
+          <button aria-pressed={month === 'all'} onClick={() => setMonth('all')}>This year + unknown</button>
           {months.map((m) => <button key={m.key} aria-pressed={month === m.key} className={m.count ? '' : 'chip-empty'} onClick={() => setMonth(m.key)}>{m.label}</button>)}
+          {v.unknown.length > 0 && <button aria-pressed={month === 'unknown'} onClick={() => setMonth('unknown')}>Date unknown</button>}
+          {v.earlier.length > 0 && <button aria-pressed={month === 'earlier'} onClick={() => setMonth('earlier')}>Earlier years</button>}
         </div>
         {items.length === 0 ? <p className="empty">Nothing arrived that month.</p> : (
           <ul className="list">
@@ -140,7 +175,7 @@ export function StatDetail() {
               <li key={p.id}>
                 <Link to={`/product/${p.id}`} className="row">
                   <Thumb src={p.product_image_url} name={p.name} />
-                  <div className="row-main"><div className="row-title">{p.name}</div><div className="row-sub">{p.brand && <span>{p.brand}</span>}<span>{SOURCE_LABEL[p.source]}</span><span>arrived {fmtDay(p.received_at)}</span></div></div>
+                  <div className="row-main"><div className="row-title">{p.name}</div><div className="row-sub">{p.brand && <span>{p.brand}</span>}<span>{SOURCE_LABEL[p.source]}</span><span>{p.received_at ? `arrived ${p.received_estimated ? '≈ ' : ''}${fmtDay(p.received_at)}` : 'date unknown'}</span></div></div>
                   <b className={p.price == null ? 'price-missing' : 'price'}>{fmtPrice(p.price) ?? 'Add price'}</b>
                 </Link>
               </li>
@@ -226,5 +261,90 @@ export function StatDetail() {
       </ul>
       <p className="muted small page-sub">Updated by Housekeeping → Import ViralVue with the Amazon videos export.</p>
     </main>
+  )
+}
+
+/** A Stats gap: products of one kind without a price (Add price / Find on Amazon) or without a received date. */
+export function StatGaps() {
+  const { kind = 'sample', gap = 'unpriced' } = useParams()
+  const { data, error, reload } = useSnapshot()
+  const [amazon, setAmazon] = useState<Product | null>(null)
+  const which = kind === 'bought' ? 'bought' : 'sample'
+  const back = <><Link to={`/stats/${which}`} className="back">‹ {DETAIL_TITLE[which]}</Link><h1>{gap === 'undated' ? 'Without a date' : 'Without a price'}</h1></>
+  if (error) return <main>{back}<p className="error">{error}</p></main>
+  if (!data) return <main>{back}<p className="muted">Loading…</p></main>
+  const v = valueOf(data.products, which)
+  const items = (gap === 'undated' ? v.undated : v.unpriced).slice().sort((a, b) => a.name.localeCompare(b.name))
+  return (
+    <main>
+      {back}
+      <p className="muted page-sub">
+        {items.length} {which === 'bought' ? `bought product${items.length === 1 ? '' : 's'}` : `sample${items.length === 1 ? '' : 's'}`}.{' '}
+        {gap === 'undated' ? 'Set the day it arrived; it then counts in its month instead of Date unknown.' : 'Type the price, or Find on Amazon fills it with the picture and ASIN.'}
+      </p>
+      {items.length === 0 ? <p className="empty">Nothing missing.</p> : (
+        <ul className="list">
+          {items.map((p) => (
+            <li key={p.id} className="gap-row">
+              <Link to={`/product/${p.id}`} state={{ from: `/stats/${which}/${gap}` }} className="row">
+                <Thumb src={p.product_image_url} name={p.name} />
+                <div className="row-main"><div className="row-title">{p.name}</div><div className="row-sub">{p.brand && <span>{p.brand}</span>}<span>{SOURCE_LABEL[p.source]}</span></div></div>
+              </Link>
+              {gap === 'undated'
+                ? <DateFix product={p} onSaved={reload} />
+                : <PriceFix product={p} onSaved={reload} onAmazon={() => setAmazon(p)} />}
+            </li>
+          ))}
+        </ul>
+      )}
+      {amazon && (
+        <FindAmazonSheet product={amazon} hasAmazonListing={data.listings.some((l) => l.product_id === amazon.id && l.platform === 'amazon_us')}
+          onClose={() => setAmazon(null)} onDone={reload} />
+      )}
+    </main>
+  )
+}
+
+function PriceFix({ product, onSaved, onAmazon }: { product: Product; onSaved: () => void; onAmazon: () => void }) {
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const value = parsePrice(text)
+  const save = async () => {
+    if (value == null) return
+    setBusy(true)
+    const { error } = await supabase.from('products').update({ price: value }).eq('id', product.id)
+    setBusy(false)
+    if (error) setErr(error.message)
+    else onSaved()
+  }
+  return (
+    <form className="gap-fix" onSubmit={(e) => { e.preventDefault(); save() }}>
+      <input inputMode="decimal" placeholder="$" aria-label={`Price of ${product.name}`} value={text} onChange={(e) => setText(e.target.value)} />
+      <button className="secondary" type="submit" disabled={busy || value == null}>Save</button>
+      <button className="secondary" type="button" onClick={onAmazon}>Find on Amazon</button>
+      {err && <span className="error small">{err}</span>}
+    </form>
+  )
+}
+
+function DateFix({ product, onSaved }: { product: Product; onSaved: () => void }) {
+  const [date, setDate] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const save = async () => {
+    if (!date) return
+    setBusy(true)
+    const { error } = await saveReceived(product.id, date)
+    setBusy(false)
+    if (error) setErr(error.message)
+    else onSaved()
+  }
+  return (
+    <form className="gap-fix" onSubmit={(e) => { e.preventDefault(); save() }}>
+      <input type="date" aria-label={`Day ${product.name} arrived`} value={date} onChange={(e) => setDate(e.target.value)} />
+      <button className="secondary" type="submit" disabled={busy || !date}>Save</button>
+      {err && <span className="error small">{err}</span>}
+    </form>
   )
 }

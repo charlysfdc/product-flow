@@ -2,6 +2,7 @@
 //   { upc }                 barcode → UPC databases (name, brand, image, ASIN) → Amazon search by UPC for the ASIN
 //   { image, media_type }   photo of the packaging → Claude reads brand, product, variant (and a printed UPC)
 //   { url }                 Amazon or TikTok Shop link → page title, image, ASIN / product id
+//   { search }              Find on Amazon: up to 5 Amazon US results for a product name (picture, title, price, ASIN)
 // The Amazon page logic is ported from Influencer-Workflow-Engine-Main amazon_utils.py,
 // including its r.jina.ai reader fallback for when Amazon shows a captcha.
 import Anthropic from 'npm:@anthropic-ai/sdk@0.135.0'
@@ -403,6 +404,65 @@ async function amazonSearch(code: string): Promise<{ asin: string; title: string
   return null
 }
 
+// ---- search by name (Find on Amazon) ---------------------------------------------
+
+export interface Candidate { asin: string; title: string; brand: string | null; image_url: string | null; price: number | null; url: string }
+
+/** Result blocks of an Amazon search page (HTML, straight or through the reader): organic first, one per ASIN. */
+function parseSearch(html: string): Candidate[] {
+  const blocks = html.split(/(?=<div[^>]+data-component-type="s-search-result")/).slice(1)
+  const seen = new Map<string, Candidate & { sponsored: boolean }>()
+  for (const b of blocks) {
+    const asin = b.match(/data-asin="([A-Z0-9]{10})"/)?.[1]
+    if (!asin) continue
+    const sponsored = /Sponsored/.test(b.slice(0, 4000))
+    const heads = [...b.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].map((m) => clean(m[1])).filter((t): t is string => Boolean(t))
+    const alt = clean(b.match(/<img[^>]+class="s-image"[^>]*alt="([^"]*)"/)?.[1] ?? b.match(/<img[^>]+alt="([^"]*)"[^>]+class="s-image"/)?.[1])
+    // the product picture's alt text is the listing title; headings later in a block can belong to a carousel
+    const title = (alt && alt.length > 10 ? alt : [...heads.slice(0, 2)].sort((x, y) => y.length - x.length)[0]) || null
+    if (!title) continue
+    const brand = heads.length > 1 && heads[0].length < 40 ? heads[0] : null
+    const img = b.match(/<img[^>]+class="s-image"[^>]+src="([^"]+)"/)?.[1] ?? b.match(/<img[^>]+src="([^"]+)"[^>]+class="s-image"/)?.[1] ?? null
+    const pr = b.match(/<span class="a-offscreen">\$([\d,]+\.\d{2})<\/span>/)?.[1]
+    const price = pr ? Number(pr.replace(/,/g, '')) : null
+    const c = { asin, title, brand, image_url: img ? hiResVariant(img) : null, price, url: `https://www.amazon.com/dp/${asin}`, sponsored }
+    const have = seen.get(asin)
+    if (!have || (have.sponsored && !sponsored)) seen.set(asin, c)
+  }
+  return [...seen.values()].sort((a, b) => Number(a.sponsored) - Number(b.sponsored)).map(({ sponsored: _s, ...c }) => c)
+}
+
+/**
+ * Amazon US search for a product name: the page itself, else through the reader (HTML mode, which keeps
+ * the result blocks). Says so when Amazon blocks both rather than guessing.
+ */
+async function searchAmazon(query: string): Promise<{ candidates: Candidate[]; note: string | null; via: string | null }> {
+  const q = query.replace(/\s+/g, ' ').trim().slice(0, 150)
+  if (q.length < 3) throw new HttpError(400, 'Type a few words of the product name.')
+  const url = `https://www.amazon.com/s?k=${encodeURIComponent(q)}`
+  const tries: [string, () => Promise<string>][] = [
+    ['amazon', async () => {
+      const page = await fetchText(url, { headers: HEADERS }, 20000)
+      return page.status < 400 ? page.text : ''
+    }],
+    ['reader', async () => (await fetchText(`https://r.jina.ai/${url}`, { headers: { ...jinaHeaders(), 'X-Return-Format': 'html' } }, 45000)).text],
+  ]
+  const blocked: string[] = []
+  for (const [via, get] of tries) {
+    try {
+      const html = await get()
+      if (!html || looksLikeCaptcha(html)) { blocked.push(via); continue }
+      const candidates = parseSearch(html).slice(0, 5)
+      if (candidates.length) return { candidates, note: null, via }
+      blocked.push(via)
+    } catch (e) {
+      console.error('search', via, (e as Error).message)
+      blocked.push(via)
+    }
+  }
+  return { candidates: [], via: null, note: 'Amazon blocked the search right now. Paste the product’s Amazon link instead (Share → Copy Link in the Amazon app).' }
+}
+
 async function byUpc(raw: string): Promise<Identification> {
   const code = raw.replace(/\D/g, '')
   if (code.length < 8) throw new HttpError(400, 'That barcode is too short.')
@@ -523,6 +583,7 @@ async function byPhoto(image: string, mediaType: string): Promise<Identification
 }
 
 serve(async (body) => {
+  if (typeof body.search === 'string') return searchAmazon(body.search)
   if (typeof body.upc === 'string' && body.upc) return byUpc(body.upc)
   if (typeof body.url === 'string' && body.url) return byUrl(body.url.trim())
   if (typeof body.image === 'string' && body.image) return byPhoto(body.image, String(body.media_type ?? 'image/jpeg'))

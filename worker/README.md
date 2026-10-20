@@ -27,6 +27,25 @@ scales to zero between edits, and never needs the Mac.
 6. Review screen: **Approve** sets the product to Ready ("Edited, not posted"). **Redo** moves this cut to
    `finished/Earlier drafts`, and a new job gets the note plus the previous plan so Claude adjusts it.
 
+## Voice-over (footage without talking)
+
+- After transcription, footage with under 15 words or under 10% speech stops at once; otherwise the planner also
+  says whether Charly or Zanje talk about the product (`spoken_review`), so a pilot announcement or a TV does not
+  count. Either way the job goes to `needs_review` with `output.stage = 'ask_voiceover'` and the question
+  "No talking found in these clips. Create a voice-over?" (Create voice-over · Captions & music only · Cancel).
+- Create voice-over, or the "Add a voice-over" switch on the Edit sheet: `input.voiceover = 'script'`. Claude
+  (`pf/voiceplan.py`) writes both scripts as lines, each with the shots it plays over; the job stops at
+  `stage = 'script'` and the phone's Voice-over script screen lets Charly edit each line, approve it, or have it
+  written again with a note. Nothing is spoken before approval.
+- Approve script: `input.voiceover = 'render'` with the edited lines in `input.vo_plan`. `pf/voice.py` reads each
+  script in one ElevenLabs call (voice "Charly South African", `eleven_v3`, with timestamps), sped up at most
+  1.2x if it runs long; captions come from the timestamps; the clips' own sound is lowered 18 dB under the voice.
+  ElevenLabs characters are recorded in `jobs.output.elevenlabs`.
+- Captions & music only: `input.voiceover = 'music'`; on-screen lines over a track from `Content Library/Music`
+  in Drive (found, never created; without it the cut keeps only the clips' sound).
+- A Redo of a voiced cut goes back to the script with the note. The ElevenLabs key is the Supabase secret
+  `ELEVENLABS_API_KEY`, handed to the worker by `worker` `claim` only for the reading step.
+
 ## Why the secrets are where they are
 
 Modal holds one secret, `WORKER_SECRET`. Google (the Drive refresh token, client id and secret) and

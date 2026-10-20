@@ -14,9 +14,9 @@ export function Home() {
   // Ready to Post catches up with anything changed elsewhere (ViralVue imports, the other phone): at most every 6 hours
   useEffect(() => {
     try {
-      const last = Number(localStorage.getItem('pf.readySync') || 0)
+      const last = Number(localStorage.getItem('pf.readySync.v2') || 0)
       if (Date.now() - last < 6 * 3600_000) return
-      localStorage.setItem('pf.readySync', String(Date.now()))
+      localStorage.setItem('pf.readySync.v2', String(Date.now()))
     } catch { return }
     tidyReady()
   }, [])

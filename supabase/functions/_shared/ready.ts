@@ -97,7 +97,10 @@ async function writeText(token: string, folder: string, name: string, text: stri
  * Copies carry their source file id in the description, so a newer approved edit replaces the old copy.
  * Removed copies go to the Drive bin (recoverable for 30 days), never deleted outright.
  */
-export async function syncReady(db: SupabaseClient, productId?: string): Promise<{ copied: number; removed: number; folder: string }> {
+export async function syncReady(db: SupabaseClient, productId?: string, budgetMs = 90_000): Promise<{ copied: number; removed: number; folder: string; more: boolean }> {
+  // a function call has about 150 s: a big catch-up stops early and says so, and the app calls again
+  const until = Date.now() + budgetMs
+  let more = false
   const { token } = await driveToken(db)
   const folder = await ensureFolder(token, READY_FOLDER, 'root')
   const sel = db.from('products').select('id,name,status,archived_at,post_copy')
@@ -105,6 +108,7 @@ export async function syncReady(db: SupabaseClient, productId?: string): Promise
   const present = await listFolder(token, folder)
   let copied = 0, removed = 0
   for (const p of products ?? []) {
+    if (Date.now() > until) { more = true; break }
     const want = await wanted(db, p)
     const pre = prefix(p)
     const mine = present.filter((f) => f.name.startsWith(pre))
@@ -132,5 +136,5 @@ export async function syncReady(db: SupabaseClient, productId?: string): Promise
       removed++
     }
   }
-  return { copied, removed, folder }
+  return { copied, removed, folder, more }
 }

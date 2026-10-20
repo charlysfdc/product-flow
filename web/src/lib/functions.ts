@@ -63,10 +63,18 @@ export interface SyncResult { added: number; raw: number; finished: number; stat
 /** Records clips found in the product's raw/ and finished/ folders that the app doesn't know yet. */
 /** My Drive/Ready to Post matches the database: finished files of what is edited but not posted (one product, or all). */
 export const readySync = (productId?: string) =>
-  callFunction<{ copied: number; removed: number; folder: string }>('publish', { action: 'ready_sync', product_id: productId }, 140_000)
+  callFunction<{ copied: number; removed: number; folder: string; more: boolean }>('publish', { action: 'ready_sync', product_id: productId }, 140_000)
 
-/** In the background: the folder catching up after a post changes. Never in the way of what Charly is doing. */
-export const tidyReady = (productId?: string) => { readySync(productId).catch((e) => console.warn('Ready to Post:', e)) }
+/** In the background: the folder catching up after a post changes, in rounds while there is more to copy.
+ * Never in the way of what Charly is doing. */
+export const tidyReady = (productId?: string) => {
+  void (async () => {
+    for (let round = 0; round < 12; round++) {
+      const r = await readySync(productId)
+      if (!r.more) return
+    }
+  })().catch((e) => console.warn('Ready to Post:', e))
+}
 
 export const syncFromDrive = (productId: string) => callFunction<SyncResult>('drive', { action: 'sync', product_id: productId })
 

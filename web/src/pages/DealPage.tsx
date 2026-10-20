@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { createProductFromDeal, ignoreDeal, linkDealToProduct, receiveDeal, selectAll, substituteDeal, suggestProducts, unlinkDeal } from '../lib/deals'
-import { SOURCE_HELP, SOURCE_LABEL, SOURCE_ORDER, STATUS_LABEL, type Deal, type Product, type ProductSource } from '../lib/types'
+import { parsePrice, SOURCE_HELP, SOURCE_LABEL, SOURCE_ORDER, STATUS_LABEL, type Deal, type Product, type ProductSource } from '../lib/types'
 import { DealCard } from '../components/DealCard'
 import { Options, Sheet } from '../components/Sheet'
 
@@ -18,6 +18,7 @@ export function DealPage() {
   const [substitute, setSubstitute] = useState<Product | null>(null)
   const [substituteSource, setSubstituteSource] = useState<'amazon_sample' | 'bought'>('amazon_sample')
   const [arrived, setArrived] = useState(false)
+  const [paid, setPaid] = useState<string | null>(null)   // "I bought it": what Charly paid (null until picked)
   const [confirm, setConfirm] = useState<Product | null>(null)
   const [confirmSource, setConfirmSource] = useState<'amazon_sample' | 'bought'>('amazon_sample')
   const [confirmUnlink, setConfirmUnlink] = useState(false)
@@ -232,19 +233,33 @@ export function DealPage() {
       )}
 
       {arrived && (
-        <Sheet title="It arrived: how did you get it?" onClose={() => setArrived(false)}>
+        <Sheet title="It arrived: how did you get it?" onClose={() => { setArrived(false); setPaid(null) }}>
           <p className="muted small">This creates the product with the brand, ASIN and image from the deal.</p>
           <Options
             options={[
               { value: 'amazon_sample' as const, label: 'Free sample', help: 'The brand sent it through the deal.' },
               { value: 'bought' as const, label: 'I bought it', help: 'Paid for it yourself; the deal stays linked for the record.' },
             ]}
-            value={null}
-            onPick={(source) => run('It arrived', async () => {
-              const p = await receiveDeal(supabase, deal, { source })
-              return `/product/${p.id}`
-            })}
+            value={paid !== null ? 'bought' : null}
+            onPick={(source) => source === 'bought'
+              ? setPaid(deal.price != null ? Number(deal.price).toFixed(2) : '')
+              : run('It arrived', async () => {
+                const p = await receiveDeal(supabase, deal, { source })
+                return `/product/${p.id}`
+              })}
           />
+          {paid !== null && (
+            <form className="form" onSubmit={(e) => { e.preventDefault(); run('It arrived', async () => {
+              const price = parsePrice(paid)
+              const p = await receiveDeal(supabase, deal, { source: 'bought', ...(price != null ? { price } : {}) })
+              return `/product/${p.id}`
+            }) }}>
+              <label>What did you pay? <span className="muted">(optional, US $)</span>
+                <input inputMode="decimal" autoFocus placeholder="e.g. 27.99" value={paid} onChange={(e) => setPaid(e.target.value)} />
+              </label>
+              <button className="primary" type="submit" disabled={busy}>It arrived</button>
+            </form>
+          )}
         </Sheet>
       )}
 

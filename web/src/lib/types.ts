@@ -18,6 +18,7 @@ export interface Product {
   drive_folder_name: string | null
   extra_drive_folders?: { id: string | null; name: string | null }[]   // migration 0004
   post_copy?: PostCopy | null                                          // migration 0007
+  price?: number | null                                                // migration 0009: US dollars, for taxes later
   archived_at?: string | null                                          // migration 0008: hidden from the flow
   archived_reason?: string | null
   archived_move?: { moved?: { id: string; name: string; from: string; to: string }[]; note?: string | null; at?: string } | null
@@ -157,7 +158,7 @@ export interface Deal {
 export interface LinkAdded {
   listing_id?: string
   post_id?: string
-  product_before?: Partial<Pick<Product, 'source' | 'brand' | 'received_at' | 'product_image_url'>>
+  product_before?: Partial<Pick<Product, 'source' | 'brand' | 'received_at' | 'product_image_url' | 'price'>>
   created_product?: boolean
   stamped_received?: boolean
   substituted?: boolean       // the brand sent a different product than the one applied for
@@ -208,6 +209,18 @@ export function driveFolderUrl(p: { drive_folder_id?: string | null; drive_folde
 export const isHidden = (p: { archived_at?: string | null }) => Boolean(p.archived_at)
 
 export const ARCHIVE_REASON_LABEL: Record<string, string> = { not_a_product: 'Not a product review' }
+
+/** "$27.99"; null for no price. */
+export const fmtPrice = (n: number | string | null | undefined) =>
+  n == null || n === '' || !Number.isFinite(Number(n)) ? null : `$${Number(n).toFixed(2)}`
+
+/** "27,99" or "$27.99" → 27.99; null when empty or not a price. */
+export function parsePrice(s: string): number | null {
+  const t = s.replace(/[$\s]/g, '').replace(',', '.')
+  if (!t) return null
+  const n = Number(t)
+  return Number.isFinite(n) && n >= 0 && n < 100000 ? Math.round(n * 100) / 100 : null
+}
 
 export const STATUS_ORDER: ProductStatus[] = ['expected', 'received', 'filmed', 'editing', 'ready', 'done']
 

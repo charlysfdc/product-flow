@@ -435,3 +435,5 @@ a.sv-btn { color: var(--primary-text); }
 .stg-off { opacity: 0.45; cursor: default; }
 a.stg { color: var(--text); }
 a.stg-next { color: var(--primary-text); }
+
+.chip-add { color: var(--muted); border: 1px dashed var(--line); box-shadow: none; }

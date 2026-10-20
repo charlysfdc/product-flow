@@ -151,6 +151,8 @@ export async function linkDealToProduct(client: SupabaseClient, deal: Deal, prod
   if (!substituted && !product.brand && deal.brand) { patch.brand = deal.brand; before.brand = product.brand }
   if (!product.received_at && deal.received_at) { patch.received_at = day(deal.received_at); before.received_at = product.received_at }
   if (!substituted && !product.product_image_url && deal.image_url) { patch.product_image_url = deal.image_url; before.product_image_url = product.product_image_url }
+  // the price is only filled when empty, never over one Charly set (undefined: migration 0009 not applied yet)
+  if (product.price === null && deal.price != null) { patch.price = deal.price; before.price = null }
   if (Object.keys(patch).length) {
     throwIf('update product', (await client.from('products').update(patch).eq('id', product.id)).error)
     added.product_before = before
@@ -244,7 +246,7 @@ export async function substituteDeal(client: SupabaseClient, deal: Deal, arrived
  * ASIN listing, full image, received date), stamp received_at and link the deal.
  * Used by "It arrived", "Create new product", the import's auto-create and, later, Add product.
  */
-export async function receiveDeal(client: SupabaseClient, deal: Deal, overrides: Partial<Pick<Product, 'name' | 'status' | 'source'>> = {}): Promise<Product> {
+export async function receiveDeal(client: SupabaseClient, deal: Deal, overrides: Partial<Pick<Product, 'name' | 'status' | 'source' | 'price'>> = {}): Promise<Product> {
   const received = deal.received_at ?? new Date().toISOString()
   const stamped = !deal.received_at
   if (stamped) {
@@ -260,8 +262,14 @@ export async function receiveDeal(client: SupabaseClient, deal: Deal, overrides:
     received_at: day(received),
     product_image_url: deal.image_url,
     notes: `From the ViralVue brand deal${deal.title ? `: ${deal.title}` : ''}`,
+    // what Charly paid ("I bought it"), else the deal's listed price
+    ...(overrides.price != null ? { price: overrides.price } : deal.price != null ? { price: deal.price } : {}),
   }
   let res = await client.from('products').insert(row).select('*').single()
+  if (res.error?.code === 'PGRST204' && 'price' in row) {   // migration 0009 not applied yet
+    delete (row as { price?: number }).price
+    res = await client.from('products').insert(row).select('*').single()
+  }
   if (res.error?.code === '23505') res = await client.from('products').insert({ ...row, name: `${base} (${deal.asin ?? deal.external_id.slice(0, 8)})` }).select('*').single()
   throwIf('create product', res.error)
   const product = res.data as Product
@@ -384,6 +392,7 @@ export async function importDeals(client: SupabaseClient, csvText: string, onPro
       if (!product.brand && deal.brand) patch.brand = deal.brand
       if (!product.received_at && deal.received_at) patch.received_at = day(deal.received_at)
       if (!product.product_image_url && deal.image_url) patch.product_image_url = deal.image_url
+      if (product.price === null && deal.price != null) patch.price = deal.price
       if (Object.keys(patch).length) {
         throwIf('update product', (await client.from('products').update(patch).eq('id', product.id)).error)
         Object.assign(product, patch)

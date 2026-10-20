@@ -6,7 +6,7 @@
 const P = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
   id, name, brand: null, variant: null, upc: null, source: 'amazon_sample', status: 'received', deadline: null,
   drive_folder_id: null, drive_folder_name: null, extra_drive_folders: [], product_image_url: null,
-  received_at: '2026-10-16', notes: null, updated_at: '2026-10-18T09:00:00Z', ...extra,
+  received_at: '2026-10-16', notes: null, price: null, updated_at: '2026-10-18T09:00:00Z', ...extra,
 })
 const inDays = (n: number) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10)
 
@@ -22,7 +22,7 @@ const products = [
   P('p9', 'Flashforge AD5X', { brand: 'Flashforge', status: 'ready' }),
   P('p10', 'Eufy Robot Vacuum', { brand: 'Eufy', status: 'done' }),
   P('p13', 'IMG_2231 kitchen', { status: 'ready', source: 'unknown', drive_folder_id: 'x13' }),
-  P('p12', 'Blood Pressure Monitor', { brand: 'Omron', status: 'ready', drive_folder_id: 'x12', received_at: '2026-10-02' }),
+  P('p12', 'Blood Pressure Monitor', { brand: 'Omron', price: 39.99, status: 'ready', drive_folder_id: 'x12', received_at: '2026-10-02' }),
 ]
 const listings = [
   { id: 'l1', product_id: 'p6', platform: 'amazon_us', external_id: null, url: null, commission: null, availability: 'unchecked', availability_note: null, checked_at: null },

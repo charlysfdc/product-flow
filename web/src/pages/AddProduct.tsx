@@ -5,7 +5,7 @@ import { useAuth } from '../lib/auth'
 import { findWaitingDeals, receiveDeal, substituteDeal } from '../lib/deals'
 import { callFunction, makeDriveFolder, uploadPhoto, type Identification } from '../lib/functions'
 import { asinFromUrl, captureFrame, fileToPhoto, findByName, findExisting, looksLikeUrl, readBarcode, shortName, type Photo } from '../lib/intake'
-import { SOURCE_LABEL, type Deal, type Product, type ProductSource } from '../lib/types'
+import { SOURCE_LABEL, parsePrice, type Deal, type Product, type ProductSource } from '../lib/types'
 import { Thumb } from '../components/ProductRow'
 import { IconImage, IconLink, IconType } from '../components/Icons'
 import { Sheet } from '../components/Sheet'
@@ -68,6 +68,7 @@ export function AddProduct() {
   const [form, setForm] = useState({ name: '', brand: '', variant: '', asin: '' })
   const [source, setSource] = useState<ProductSource>('amazon_sample')
   const [deadline, setDeadline] = useState('')
+  const [paid, setPaid] = useState<string | null>(null)   // "What did you pay?" (bought); null = not touched
 
   // ---- camera -------------------------------------------------------------
 
@@ -277,15 +278,24 @@ export function AddProduct() {
       if (sameName) throw new Error(`You already have a product called "${sameName.name}". Change the name, or open that one.`)
       const today = new Date().toISOString().slice(0, 10)
       let product: Product
+      // the price: what Charly paid when bought, else the deal's or the Amazon page's listed price
+      const paidPrice = source === 'bought' && paid !== null ? parsePrice(paid) : null
       if (choice && choice.mode !== 'substitute') {
-        product = await receiveDeal(supabase, choice.deal, { name, status: 'received', source: choice.mode === 'bought' ? 'bought' : 'amazon_sample' })
+        product = await receiveDeal(supabase, choice.deal, { name, status: 'received', source: choice.mode === 'bought' ? 'bought' : 'amazon_sample', ...(paidPrice != null ? { price: paidPrice } : {}) })
       } else {
-        const ins = await supabase.from('products').insert({
+        const listed = paidPrice ?? (source === 'bought' && paid !== null ? null : ident?.price ?? null)
+        const row = {
           name, brand: form.brand.trim() || null, variant: form.variant.trim() || null, upc: ident?.upc ?? null,
           source, status: 'received', received_at: today, deadline: deadline || null,
           product_image_url: ident?.image_url ?? null, added_by: session?.user.id ?? null,
           notes: ident?.title && ident.title !== name ? `Listing title: ${ident.title}` : null,
-        }).select('*').single()
+          ...(listed != null ? { price: listed } : {}),
+        }
+        let ins = await supabase.from('products').insert(row).select('*').single()
+        if (ins.error?.code === 'PGRST204' && 'price' in row) {   // migration 0009 not applied yet
+          const { price: _p, ...rest } = row
+          ins = await supabase.from('products').insert(rest).select('*').single()
+        }
         if (ins.error) throw ins.error
         product = ins.data as Product
         const asin = form.asin.trim().toUpperCase()
@@ -457,6 +467,13 @@ export function AddProduct() {
                     ))}
                   </div>
                 </div>
+              )}
+              {source === 'bought' && (
+                <label>What did you pay? <span className="muted small">(optional, US $)</span>
+                  <input id="d-paid" inputMode="decimal" placeholder="e.g. 27.99"
+                    value={paid ?? (choice?.deal.price ?? ident?.price ?? '')?.toString()}
+                    onChange={(e) => setPaid(e.target.value)} />
+                </label>
               )}
               <label>Deadline <span className="muted small">{source === 'tiktok_sample' ? '(when the TikTok Shop video is due)' : '(optional)'}</span>
                 <input id="d-deadline" type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />

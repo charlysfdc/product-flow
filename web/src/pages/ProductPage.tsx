@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { mergeProducts } from '../lib/merge'
 import {
   AVAILABILITY_LABEL, PLATFORM_LABEL, PLATFORM_ORDER, SOURCE_HELP, SOURCE_LABEL, SOURCE_ORDER,
-  ARCHIVE_REASON_LABEL, STATUS_HELP, STATUS_LABEL, STATUS_ORDER, driveFolderUrl,
+  ARCHIVE_REASON_LABEL, fmtPrice, parsePrice, STATUS_HELP, STATUS_LABEL, STATUS_ORDER, driveFolderUrl,
   type Platform, type Post, type Product, type ProductSource, type ProductStatus,
 } from '../lib/types'
 import { Thumb, deadlineText } from '../components/ProductRow'
@@ -50,6 +50,7 @@ type SheetKind =
   | { kind: 'edit' }
   | { kind: 'hide' }
   | { kind: 'film' }
+  | { kind: 'price' }
   | null
 
 export function ProductPage() {
@@ -304,6 +305,7 @@ export function ProductPage() {
       <div className="chips">
         <button className={`chip chip-btn status-${p.status}`} onClick={() => setSheet({ kind: 'status' })}>{STATUS_LABEL[p.status]} ▾</button>
         <button className={'chip chip-btn' + (p.source === 'unknown' ? ' chip-ask' : '')} onClick={() => setSheet({ kind: 'source' })}>{SOURCE_LABEL[p.source]} ▾</button>
+        <button className={'chip chip-btn' + (fmtPrice(p.price) ? '' : ' chip-add')} onClick={() => setSheet({ kind: 'price' })}>{fmtPrice(p.price) ?? 'Add price'}</button>
         {due && <span className="chip chip-due">{due}</span>}
         {totalViews > 0 && <span className="chip">{totalViews.toLocaleString()} views</span>}
         {folderUrl
@@ -538,6 +540,20 @@ export function ProductPage() {
         />
       )}
 
+      {sheet?.kind === 'price' && (
+        <PriceSheet
+          product={p}
+          dealPrice={deals.find((d) => d.price != null)?.price ?? null}
+          busy={busy}
+          onClose={close}
+          onSave={(price) => run('Saving the price', async () => {
+            const { error } = await supabase.from('products').update({ price }).eq('id', p.id)
+            if (error) throw new Error(/price/.test(error.message) ? 'The price needs the database update (migration 0009).' : error.message)
+            close()
+          })}
+        />
+      )}
+
       {sheet?.kind === 'film' && (
         <Sheet title="Film" onClose={close}>
           <p className="muted small">
@@ -623,6 +639,29 @@ function PostSheet({ platform, posts, busy, onSave, onRemove, onClose }: {
         {appPost && (
           <button type="button" className="link" onClick={() => onRemove(appPost)} disabled={busy}>Not posted after all</button>
         )}
+      </form>
+    </Sheet>
+  )
+}
+
+function PriceSheet({ product, dealPrice, busy, onSave, onClose }: { product: Product; dealPrice: number | null; busy: boolean; onSave: (price: number | null) => void; onClose: () => void }) {
+  const [text, setText] = useState(product.price != null ? Number(product.price).toFixed(2) : '')
+  const value = parsePrice(text)
+  const bad = text.trim() !== '' && value === null
+  return (
+    <Sheet title="Price" onClose={onClose}>
+      <p className="muted small">
+        In US dollars, kept for taxes. {product.source === 'bought' ? 'What you paid.' : 'The listed price of the sample.'}
+        {dealPrice != null && Number(dealPrice) !== Number(product.price) ? ` The brand deal lists ${fmtPrice(dealPrice)}.` : ''}
+      </p>
+      <form className="form" onSubmit={(e) => { e.preventDefault(); if (!bad) onSave(value) }}>
+        <label>
+          Price (US $)
+          <input inputMode="decimal" autoFocus placeholder="e.g. 27.99" value={text} onChange={(e) => setText(e.target.value)} />
+        </label>
+        {bad && <p className="error small">That isn’t a price; type it like 27.99.</p>}
+        <button className="primary" type="submit" disabled={busy || bad}>{value === null ? (product.price != null ? 'Remove the price' : 'Save') : `Save ${fmtPrice(value)}`}</button>
+        {dealPrice != null && Number(dealPrice) !== value && <button type="button" className="link" onClick={() => setText(Number(dealPrice).toFixed(2))}>Use the deal price ({fmtPrice(dealPrice)})</button>}
       </form>
     </Sheet>
   )

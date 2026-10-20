@@ -20,11 +20,12 @@ interface Identification {
   tiktok_product_id: string | null
   confidence: 'high' | 'medium' | 'low' | null
   note: string | null
+  price: number | null         // the listed price on the Amazon page (US dollars), when it could be read
 }
 
 const empty = (): Identification => ({
   name: null, brand: null, variant: null, upc: null, asin: null, title: null, image_url: null,
-  url: null, platform: null, tiktok_product_id: null, confidence: null, note: null,
+  url: null, platform: null, tiktok_product_id: null, confidence: null, note: null, price: null,
 })
 
 const HEADERS = {
@@ -128,6 +129,21 @@ function amazonBrand(text: string): string | null {
   return clean(m ? m[1] : null)
 }
 
+/**
+ * The listed price on an Amazon product page (HTML or the reader's text). Only the buy-box patterns,
+ * so a price from "customers also bought" is never taken; null when unsure.
+ */
+function amazonPrice(text: string): number | null {
+  const pick = (v: string | undefined) => {
+    const n = v ? Number(v.replace(/,/g, '')) : NaN
+    return Number.isFinite(n) && n > 0 && n < 100000 ? Math.round(n * 100) / 100 : null
+  }
+  return pick(text.match(/"priceAmount"\s*:\s*([\d.]+)/)?.[1])
+    ?? pick(text.match(/id="corePrice[^"]*"[\s\S]{0,3000}?class="a-offscreen">\s*\$([\d,]+\.\d{2})/)?.[1])
+    ?? pick(text.match(/id="priceblock_(?:our|deal|sale)price"[^>]*>\s*\$([\d,]+\.\d{2})/)?.[1])
+    ?? pick(text.match(/(?:^|\n)\s*(?:-\d{1,2}%\s*)?\$([\d,]+\.\d{2})\s*(?:\n|$)[\s\S]{0,200}?(?:List Price|Typical price|FREE delivery|Ships from)/i)?.[1])
+}
+
 /** Large (1500 px) variant of an Amazon image URL. */
 function hiResVariant(url: string): string {
   const m = url.match(/\/images\/I\/([A-Za-z0-9%+\-_]+?)(?:\._[^/]*)?\.(jpg|png)$/)
@@ -135,9 +151,9 @@ function hiResVariant(url: string): string {
 }
 
 /** The page through the r.jina.ai reader proxy, which gets past Amazon's bot block. */
-async function viaJina(url: string): Promise<{ title: string | null; image: string | null; brand: string | null; text: string }> {
+async function viaJina(url: string): Promise<{ title: string | null; image: string | null; brand: string | null; text: string; price: number | null }> {
   const { text } = await fetchText(`https://r.jina.ai/${url}`, { headers: jinaHeaders() }, 45000)
-  if (looksLikeCaptcha(text)) return { title: null, image: null, brand: null, text: '' }
+  if (looksLikeCaptcha(text)) return { title: null, image: null, brand: null, text: '', price: null }
   let title = text.match(/^Title:\s*(.+)$/m)?.[1]?.trim() ?? null
   if (title) title = title.replace(/^Amazon(\.[a-z.]+)?(\.com)?\s*:\s*/i, '').replace(/\s*[:\-|]\s*Amazon\.[a-z.]+.*$/i, '')
   const candidates = [...text.matchAll(/!\[([^\]]*)\]\((https:\/\/m\.media-amazon\.com\/images\/I\/[^)\s]+)\)/g)].map((m) => ({ alt: m[1], url: m[2] }))
@@ -154,7 +170,7 @@ async function viaJina(url: string): Promise<{ title: string | null; image: stri
     // first reasonably sized product image: skip tiny sprites and banners
     image = candidates.find((c) => !/_(?:US|SR|SS|SX|SY|UL)(\d{1,2})[_,.]/.test(c.url) && c.url.includes('._AC_'))?.url ?? null
   }
-  return { title, image, brand: amazonBrand(text), text }
+  return { title, image, brand: amazonBrand(text), text, price: amazonPrice(text) }
 }
 
 /**
@@ -249,7 +265,7 @@ async function webLookup(question: string): Promise<{ title: string | null; bran
 
 async function byAmazonUrl(url: string): Promise<Identification> {
   const out = { ...empty(), platform: 'amazon' as const, url }
-  let title: string | null = null, image: string | null = null, brand: string | null = null
+  let title: string | null = null, image: string | null = null, brand: string | null = null, price: number | null = null
   let finalUrl = url
   try {
     const page = await fetchText(url, { headers: HEADERS }, 25000)
@@ -258,6 +274,7 @@ async function byAmazonUrl(url: string): Promise<Identification> {
       title = amazonTitle(page.text)
       image = amazonImage(page.text)
       brand = amazonBrand(page.text)
+      price = amazonPrice(page.text)
     }
   } catch { /* blocked or timed out: try the reader */ }
   out.asin = asinFrom(finalUrl) ?? asinFrom(url)
@@ -268,6 +285,7 @@ async function byAmazonUrl(url: string): Promise<Identification> {
       title ??= j.title
       image ??= j.image
       brand ??= j.brand
+      price ??= j.price
     } catch (e) {
       if (!title) out.note = `Amazon blocked the page and the reader fallback failed (${(e as Error).message}). Type the name instead.`
     }
@@ -282,6 +300,7 @@ async function byAmazonUrl(url: string): Promise<Identification> {
   }
   out.title = title
   out.brand = brand
+  out.price = price
   out.image_url = image ? hiResVariant(image) : null
   out.name = shortName(title, brand)
   out.confidence = title ? (image ? 'high' : 'medium') : null

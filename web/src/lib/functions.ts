@@ -39,6 +39,7 @@ export interface Identification {
   tiktok_product_id: string | null
   confidence: 'high' | 'medium' | 'low' | null
   note: string | null          // anything worth showing on the Confirm screen
+  price?: number | null        // the listed price on the Amazon page, when identify could read it
 }
 
 export interface DriveStatus { connected: boolean; email: string | null; products_folder_id: string | null }

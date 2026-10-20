@@ -1,6 +1,8 @@
 // publish: Phase 4, the phone's side of posting. Signed-in Charly or Zanje only.
 //   { action: 'copy', product_id, force? }   Claude writes the Amazon title + description and the TikTok caption
 //                                            from the approved edit's transcript and plan; saved in products.post_copy
+//   { action: 'ready_sync', product_id? }    My Drive/Ready to Post matches the database (one product, or all):
+//                                            copies of finished files for what is edited but not posted yet
 //   { action: 'file', product_id, kind }     a signed link (and size) for the finished vertical or horizontal, so the
 //                                            phone can download it in pieces and hand it to the iOS share sheet
 import Anthropic from 'npm:@anthropic-ai/sdk@0.135.0'
@@ -9,6 +11,7 @@ import { HttpError, serve } from '../_shared/http.ts'
 import { DRIVE, driveToken, gd } from '../_shared/google.ts'
 import { signedMediaUrl } from '../_shared/worker.ts'
 import { PLATFORM_LABEL } from '../_shared/labels.ts'
+import { syncReady } from '../_shared/ready.ts'
 
 const MODEL = 'claude-opus-5-5'
 const AMAZON_TITLE_MAX = 60
@@ -177,6 +180,7 @@ async function writeCopy(db: SupabaseClient, productId: string, force: boolean) 
     generated_at: new Date().toISOString(),
   }
   const saved = await db.from('products').update({ post_copy: copy }).eq('id', productId)
+  if (!saved.error) await syncReady(db, productId).catch((e) => console.error('Ready to Post:', e))   // the post text file
   return { copy, cached: false, saved: !saved.error }   // saved false: migration 0007 not applied yet
 }
 
@@ -211,6 +215,8 @@ serve(async (body, { db }) => {
   switch (body.action) {
     case 'copy':
       return await writeCopy(db, String(body.product_id ?? ''), Boolean(body.force))
+    case 'ready_sync':
+      return await syncReady(db, body.product_id ? String(body.product_id) : undefined)
     case 'file':
       return await finishedFile(db, String(body.product_id ?? ''), String(body.kind ?? 'finished_vertical'))
     default:

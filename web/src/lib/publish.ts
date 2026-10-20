@@ -7,6 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { PLATFORM_ORDER, type Deal, type Listing, type Platform, type Post, type PostStatus, type Product } from './types'
 import { addReminders } from './viralvue'
+import { tidyReady } from './functions'
 
 export type RowState = 'open' | 'posted' | 'skipped'
 
@@ -56,12 +57,14 @@ export async function settleProduct(client: SupabaseClient, product: Pick<Produc
   if (allFinished(rows) && product.status !== 'done') {
     const { error } = await client.from('products').update({ status: 'done' }).eq('id', product.id)
     if (error) throw new Error(error.message)
+    tidyReady(product.id)   // all posted: its files leave Ready to Post
     return true
   }
   // a post taken back: a Posted product with an open row is "Edited, not posted" again
   if (reopen && product.status === 'done' && rows.some((r) => r.state === 'open')) {
     await client.from('products').update({ status: 'ready' }).eq('id', product.id)
   }
+  tidyReady(product.id)   // a posted platform's files leave Ready to Post, a reopened one's come back
   return false
 }
 
@@ -131,6 +134,7 @@ export async function addPlatform(client: SupabaseClient, product: Pick<Product,
   const { error } = await client.from('posts').insert({ product_id: product.id, platform, status: 'planned' })
   if (error) throw new Error(error.message)
   if (product.status === 'done') await client.from('products').update({ status: 'ready' }).eq('id', product.id)
+  tidyReady(product.id)
 }
 
 /** Which finished file each platform gets by default: Amazon the horizontal review, social the vertical. */

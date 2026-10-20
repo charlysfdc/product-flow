@@ -61,6 +61,13 @@ export const uploadPhoto = (productId: string, photo: { base64: string; width: n
 export interface SyncResult { added: number; raw: number; finished: number; status_changed: boolean; note?: string }
 
 /** Records clips found in the product's raw/ and finished/ folders that the app doesn't know yet. */
+/** My Drive/Ready to Post matches the database: finished files of what is edited but not posted (one product, or all). */
+export const readySync = (productId?: string) =>
+  callFunction<{ copied: number; removed: number; folder: string }>('publish', { action: 'ready_sync', product_id: productId }, 140_000)
+
+/** In the background: the folder catching up after a post changes. Never in the way of what Charly is doing. */
+export const tidyReady = (productId?: string) => { readySync(productId).catch((e) => console.warn('Ready to Post:', e)) }
+
 export const syncFromDrive = (productId: string) => callFunction<SyncResult>('drive', { action: 'sync', product_id: productId })
 
 export interface FolderListing { folder: { id: string; name: string; parent: string | null }; folders: { id: string; name: string }[] }

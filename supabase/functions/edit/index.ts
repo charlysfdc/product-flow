@@ -14,6 +14,7 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.118.0'
 import { HttpError, serve } from '../_shared/http.ts'
 import { DRIVE, FOLDER, driveToken, ensureFolder, gd, moveFile } from '../_shared/google.ts'
 import { signedMediaUrl, workerSecret } from '../_shared/worker.ts'
+import { syncReady } from '../_shared/ready.ts'
 
 const ACTIVE = ['queued', 'running']
 const STUCK_MS = 20 * 60_000   // a running job with no progress for this long is treated as stuck
@@ -209,7 +210,9 @@ serve(async (body, { user, db }) => {
         }
       }
       await db.from('products').update({ status: 'ready' }).eq('id', job.product_id).in('status', ['filmed', 'editing'])
-      return { ok: true }
+      // copies into My Drive/Ready to Post, which the Mac keeps offline; a failure here never blocks the approval
+      const ready = await syncReady(db, job.product_id).catch((e) => { console.error('Ready to Post:', e); return null })
+      return { ok: true, ready_to_post: ready ? ready.copied : null }
     }
 
     case 'redo': {

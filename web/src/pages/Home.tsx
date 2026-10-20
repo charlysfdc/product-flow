@@ -1,15 +1,26 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useSnapshot } from '../lib/data'
 import type { Product } from '../lib/types'
 import { ProductRow } from '../components/ProductRow'
 import { IconGear } from '../components/Icons'
+import { tidyReady } from '../lib/functions'
 import { buildFlow, fixups, moneyShort, valueOf, withPaidPrices } from '../lib/flow'
 
 const fmtDay = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : null)
 
 /** Home: Add product and search, then three tiles: Products, Stats, Housekeeping. */
 export function Home() {
+  // Ready to Post catches up with anything changed elsewhere (ViralVue imports, the other phone): at most every 6 hours
+  useEffect(() => {
+    try {
+      const last = Number(localStorage.getItem('pf.readySync') || 0)
+      if (Date.now() - last < 6 * 3600_000) return
+      localStorage.setItem('pf.readySync', String(Date.now()))
+    } catch { return }
+    tidyReady()
+  }, [])
+
   const { data, error } = useSnapshot()
   const [query, setQuery] = useState('')
   const [showHidden, setShowHidden] = useState(false)

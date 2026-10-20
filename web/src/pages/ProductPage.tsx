@@ -18,6 +18,7 @@ import { EditSheet, EditStatus, latestEdit } from '../components/Edit'
 import { unlinkDeal } from '../lib/deals'
 import { markPosted, platformList, publishRows } from '../lib/publish'
 import { ProductReminders } from '../components/ViralVue'
+import { StageBar } from '../components/Stages'
 import type { Deal } from '../lib/types'
 
 function fmtDate(d: string | null) {
@@ -48,6 +49,7 @@ type SheetKind =
   | { kind: 'unlink'; deal: Deal }
   | { kind: 'edit' }
   | { kind: 'hide' }
+  | { kind: 'film' }
   | null
 
 export function ProductPage() {
@@ -253,6 +255,21 @@ export function ProductPage() {
           <small>{[p.brand, p.variant].filter(Boolean).join(' · ') || STATUS_LABEL[p.status]}</small>
         </div>
       </div>
+
+      <StageBar
+        product={p}
+        jobs={jobs}
+        clips={clips.length}
+        posted={{ done: checklist.filter((c) => c.posted).length, of: checklist.length }}
+        onFilm={() => setSheet({ kind: 'film' })}
+        onEdit={() => {
+          const busyJob = jobs.find((j) => j.type === 'edit' && (j.status === 'queued' || j.status === 'running'))
+          const waiting = jobs.find((j) => j.type === 'edit' && j.status === 'needs_review')
+          if (busyJob) window.scrollTo({ top: 0, behavior: 'smooth' })   // its progress is in the Next step card
+          else if (waiting) navigate(`/review/${waiting.id}`)
+          else openEdit()
+        }}
+      />
 
       {actionError && <p className="error">{actionError}</p>}
 
@@ -515,9 +532,25 @@ export function ProductPage() {
         <EditSheet
           productId={p.id}
           clips={clips}
+          mode={p.status === 'ready' ? 'again' : p.status === 'done' ? 'extra' : 'first'}
           onClose={close}
           onStarted={(_job, warning) => { close(); if (warning) setActionError(warning); reload() }}
         />
+      )}
+
+      {sheet?.kind === 'film' && (
+        <Sheet title="Film" onClose={close}>
+          <p className="muted small">
+            {clips.length ? `${clips.length} clip${clips.length === 1 ? '' : 's'} in the raw folder. ` : 'Nothing filmed yet. '}
+            Upload more from Photos, or record clips dropped into Drive by hand. {p.status === 'received' || p.status === 'expected' ? 'The product moves to Filmed once a clip is in.' : 'This doesn’t change the status.'}
+          </p>
+          <div className="actions">
+            <UploadButton product={p} className="primary" label={clips.length ? 'Upload more clips' : 'Upload clips'} onStarted={close} />
+            <button className="secondary" disabled={syncing} onClick={() => sync(true)}>{syncing ? 'Looking in Drive…' : 'Sync from Drive'}</button>
+          </div>
+          {syncNote && <p className="sync-note">{syncNote}</p>}
+          <p className="tip">{ORIGINAL_TIP}</p>
+        </Sheet>
       )}
 
       {sheet?.kind === 'hide' && (

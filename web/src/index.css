@@ -421,3 +421,17 @@ a.sv-btn { color: var(--primary-text); }
 .pn-link { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; color: var(--text); }
 .pn-details { font-size: 14px; font-weight: 700; white-space: nowrap; align-self: center; }
 .bk-btn { background: none; border: 0; cursor: pointer; font: inherit; }
+
+/* ---- Stage bar: Film · Edit · Review · Post ---- */
+.stages { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 0 0 12px; }
+.stg { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 9px 4px 8px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); color: var(--text); font: inherit; cursor: pointer; text-align: center; min-width: 0; }
+.stg b { font-size: 15px; font-weight: 800; }
+.stg small { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; min-height: 13px; font-variant-numeric: tabular-nums; }
+.stg-dot { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800; background: var(--chip); color: var(--muted); }
+.stg-done .stg-dot { background: var(--done); color: #fff; }
+.stg-next { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
+.stg-next small { color: var(--primary-muted); }
+.stg-next .stg-dot { background: var(--primary-text); color: var(--primary); }
+.stg-off { opacity: 0.45; cursor: default; }
+a.stg { color: var(--text); }
+a.stg-next { color: var(--primary-text); }

@@ -178,11 +178,16 @@ def build_request(product: dict, clips: list[Clip], note: str | None, previous: 
         lines = transcript_lines(c.words)
         content.append({"type": "text", "text": _clip_header(c) + "\nTranscript:\n" + ("\n".join(lines) if lines else "(no speech)")})
     ask = "Plan the vertical and the horizontal cut."
-    if previous:
+    if previous and note:
         ask = ("Charly reviewed the previous edit of this product and asked for changes. Here is the plan that "
                "edit was rendered from:\n" + json.dumps(previous, ensure_ascii=False) +
-               "\n\nCharly's note: " + (note or "(no note)") +
+               "\n\nCharly's note: " + note +
                "\n\nAdjust that plan to address the note. Keep what the note does not criticise; change what it asks for.")
+    elif previous:
+        ask = ("Charly wants a new cut of an edit they had approved, without saying what to change. Here is the plan "
+               "that edit was rendered from:\n" + json.dumps(previous, ensure_ascii=False) +
+               "\n\nStart from that plan and make the cut better: keep its strongest moments, tighten the pacing, "
+               "and fix anything that breaks the rules above.")
     elif note:
         ask += "\n\nCharly's note for this edit: " + note
     content.append({"type": "text", "text": ask})

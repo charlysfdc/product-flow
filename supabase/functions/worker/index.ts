@@ -28,11 +28,11 @@ function appendLog(old: string | null, lines: unknown): string {
 
 const fmt = (s: number) => (s >= 60 ? `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}` : `${Math.round(s)} s`)
 
-/** Back to Filmed when no other edit of this product is still on its way. */
-async function releaseProduct(db: SupabaseClient, productId: string, exceptJob: string) {
+/** Back to where it was (Filmed, or Ready for a new cut of an edited product) when no other edit is on its way. */
+async function releaseProduct(db: SupabaseClient, productId: string, exceptJob: string, fromStatus?: string) {
   const { data: others } = await db.from('jobs').select('id').eq('product_id', productId).eq('type', 'edit')
     .in('status', ['queued', 'running', 'needs_review']).neq('id', exceptJob)
-  if (!others?.length) await db.from('products').update({ status: 'filmed' }).eq('id', productId).eq('status', 'editing')
+  if (!others?.length) await db.from('products').update({ status: fromStatus === 'ready' ? 'ready' : 'filmed' }).eq('id', productId).eq('status', 'editing')
 }
 
 Deno.serve(async (req) => {
@@ -128,7 +128,7 @@ Deno.serve(async (req) => {
           output: { ...(job.output ?? {}), error, progress: { step: 'Failed', pct: (job.output as any)?.progress?.pct ?? 0, note: error.slice(0, 300), at: new Date().toISOString() } },
           log: appendLog(job.log, [...(Array.isArray(body.log) ? body.log : []), `Failed: ${error}`]),
         }).eq('id', job.id)
-        if (job.product_id) await releaseProduct(db, job.product_id, job.id)
+        if (job.product_id) await releaseProduct(db, job.product_id, job.id, (job.input as { from_status?: string } | null)?.from_status)
         return json({ ok: true })
       }
 

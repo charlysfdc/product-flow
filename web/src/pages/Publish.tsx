@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useProduct } from '../lib/data'
 import { supabase } from '../lib/supabase'
 import { writePostCopy } from '../lib/functions'
@@ -25,7 +25,6 @@ const EMPTY_COPY: PostCopy = { amazon_title: '', amazon_description: '', tiktok_
 export function Publish() {
   const { id } = useParams()
   const { detail, error, reload } = useProduct(id)
-  const navigate = useNavigate()
   const [copy, setCopy] = useState<PostCopy | null>(null)
   const [writing, setWriting] = useState(false)
   const [copyNote, setCopyNote] = useState<string | null>(null)
@@ -249,8 +248,7 @@ export function Publish() {
   return (
     <main>
       <div className="pn">
-        {/* back to wherever this screen was opened from; the Product screen when it was opened directly */}
-        <button className="bk bk-btn" aria-label="Back" onClick={() => ((window.history.state?.idx ?? 0) > 0 ? navigate(-1) : navigate(`/product/${p.id}`))}>‹</button>
+        <Link to={`/product/${p.id}`} className="bk" aria-label="Back to the product">‹</Link>
         <Link to={`/product/${p.id}`} className="pn-link">
           <Thumb src={p.product_image_url} name={p.name} />
           <div style={{ minWidth: 0 }}>

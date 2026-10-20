@@ -12,9 +12,10 @@ export const latestEdit = (jobs: Job[]): Job | undefined =>
 const STUCK_MS = 20 * 60_000
 
 /** "Edit": pick the clips (all by default) and add an optional note, then the worker takes over. */
-export function EditSheet({ productId, clips, onClose, onStarted }: {
+export function EditSheet({ productId, clips, mode = 'first', onClose, onStarted }: {
   productId: string
   clips: Media[]
+  mode?: 'first' | 'again' | 'extra'   // again: a Ready product, builds on the approved cut; extra: a Posted product
   onClose: () => void
   onStarted: (jobId: string, warning: string | null) => void
 }) {
@@ -44,11 +45,23 @@ export function EditSheet({ productId, clips, onClose, onStarted }: {
   }
 
   return (
-    <Sheet title="Edit it" onClose={onClose}>
-      <p className="muted small">
-        A vertical cut (30–37 s, for TikTok Shop and Reels), a horizontal review for Amazon (1–2 min) and a thumbnail,
-        made from your real audio and put in the finished folder. It takes a few minutes; you can leave this screen.
-      </p>
+    <Sheet title={mode === 'again' ? 'Edit it again' : mode === 'extra' ? 'Make an extra cut' : 'Edit it'} onClose={onClose}>
+      {mode === 'again' ? (
+        <p className="muted small">
+          A new cut that starts from the one you approved, changed by your note. The product shows as Editing until you
+          review it; when you approve, the old cut moves to finished/Earlier drafts and it is ready to post again.
+          If the new cut fails, nothing changes.
+        </p>
+      ) : mode === 'extra' ? (
+        <p className="muted small">
+          It’s already posted, so the status stays Posted and the finished videos stay; the new cut is added next to them.
+        </p>
+      ) : (
+        <p className="muted small">
+          A vertical cut (30–37 s, for TikTok Shop and Reels), a horizontal review for Amazon (1–2 min) and a thumbnail,
+          made from your real audio and put in the finished folder. It takes a few minutes; you can leave this screen.
+        </p>
+      )}
       {clips.length === 0 && <p className="card">Every video in the product’s raw folder in Drive will be used.</p>}
       {clips.length > 0 && <ul className="options">
         {clips.map((c) => (
@@ -63,8 +76,8 @@ export function EditSheet({ productId, clips, onClose, onStarted }: {
       </ul>}
       <form className="form" onSubmit={(e) => { e.preventDefault(); go() }}>
         <label>
-          Anything to know? <span className="muted">(optional)</span>
-          <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Start on the reveal. Zanje's take is the better one." />
+          {mode === 'again' ? 'What should change?' : 'Anything to know?'} <span className="muted">(optional)</span>
+          <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder={mode === 'again' ? 'e.g. Shorter intro. Use the close-up of the bottle.' : "e.g. Start on the reveal. Zanje's take is the better one."} />
         </label>
         {error && <p className="error">{error}</p>}
         <button className="primary" type="submit" disabled={busy || (clips.length > 0 && picked.size === 0)}>

@@ -1,5 +1,8 @@
 // edit: the phone's side of Phase 3. Signed-in Charly or Zanje only.
-//   { action: 'start', product_id, clip_ids?, note? }   queues an edit job, product -> Editing, wakes the Modal worker
+//   { action: 'start', product_id, clip_ids?, note? }   queues an edit job, product -> Editing, wakes the Modal worker.
+//                                                        From Ready it builds on the approved plan (like Redo) and the
+//                                                        old cut moves to Earlier drafts when the new one is approved;
+//                                                        from Posted it is an extra cut and the status stays
 //   { action: 'retry', job_id }                          a failed or stuck job runs again
 //   { action: 'approve', job_id }                        product -> Edited, not posted
 //   { action: 'redo', job_id, note }                     this cut goes to finished/Earlier drafts; a new job adjusts its plan
@@ -73,7 +76,7 @@ async function loadJob(db: SupabaseClient, id: unknown) {
   return data
 }
 
-async function start(db: SupabaseClient, userId: string, productId: string, clipIds: string[] | undefined, note: string | null, redoOf: string | null) {
+async function start(db: SupabaseClient, userId: string, productId: string, clipIds: string[] | undefined, note: string | null, redoOf: string | null, fromStatus?: string) {
   const { data: p } = await db.from('products').select('id,name,status,drive_folder_id').eq('id', productId).maybeSingle()
   if (!p) throw new HttpError(404, 'That product was not found.')
   if (!p.drive_folder_id) throw new HttpError(409, 'The product has no Drive folder yet.')
@@ -83,7 +86,13 @@ async function start(db: SupabaseClient, userId: string, productId: string, clip
   if (!count) throw new HttpError(409, 'There are no videos in the raw folder in Drive. Upload clips first.')
   const { data: busy } = await db.from('jobs').select('id').eq('product_id', p.id).eq('type', 'edit').in('status', ACTIVE).limit(1)
   if (busy?.length) return { job_id: busy[0].id, already: true, warning: null }
-  const input: Record<string, unknown> = {}
+  // going back from Ready: start from the approved cut's plan, the way Redo does
+  if (!redoOf && p.status === 'ready') {
+    const { data: approved } = await db.from('jobs').select('id,output').eq('product_id', p.id).eq('type', 'edit').eq('status', 'done')
+      .order('created_at', { ascending: false }).limit(10)
+    redoOf = approved?.find((j) => j.output?.verdict === 'approved' && j.output?.plan)?.id ?? null
+  }
+  const input: Record<string, unknown> = { from_status: fromStatus ?? p.status }
   if (clipIds?.length) input.clip_ids = clipIds
   if (note) input.note = note
   if (redoOf) input.redo_of = redoOf
@@ -92,19 +101,22 @@ async function start(db: SupabaseClient, userId: string, productId: string, clip
     output: { progress: { step: 'Waiting for the worker', pct: 0 } },
   }).select('id').single()
   if (error) throw new HttpError(500, error.message)
-  // only a product waiting for its edit shows as Editing; an extra cut of a Ready or Posted one keeps its status
-  await db.from('products').update({ status: 'editing' }).eq('id', p.id).in('status', ['received', 'filmed', 'editing'])
+  // Editing while the cut is made (a Ready product too: it goes back to Ready on approve or failure);
+  // an extra cut of a Posted product keeps its status
+  await db.from('products').update({ status: 'editing' }).eq('id', p.id).in('status', ['received', 'filmed', 'editing', 'ready'])
   const warning = await wake(db, job.id)
   return { job_id: job.id, already: false, warning }
 }
 
 /** Moves a reviewed-and-replaced cut out of finished/ (into finished/Earlier drafts) and forgets its media rows. */
 async function shelve(db: SupabaseClient, job: Record<string, any>) {
-  const media = (job.output?.media ?? {}) as Record<string, string>
-  const ids = Object.values(media)
+  await shelveMedia(db, job.product_id, Object.values((job.output?.media ?? {}) as Record<string, string>))
+}
+
+async function shelveMedia(db: SupabaseClient, productId: string, ids: string[]) {
   if (!ids.length) return
   const { data: rows } = await db.from('media').select('id,drive_file_id').in('id', ids)
-  const { data: p } = await db.from('products').select('drive_folder_id').eq('id', job.product_id).single()
+  const { data: p } = await db.from('products').select('drive_folder_id').eq('id', productId).single()
   if (rows?.length && p?.drive_folder_id) {
     const { token } = await driveToken(db)
     const finished = await ensureFolder(token, 'finished', p.drive_folder_id)
@@ -135,6 +147,19 @@ serve(async (body, { user, db }) => {
       const job = await loadJob(db, body.job_id)
       if (job.status !== 'needs_review') throw new HttpError(409, 'This edit is not waiting for review.')
       await db.from('jobs').update({ status: 'done', question: null, output: { ...(job.output ?? {}), verdict: 'approved', reviewed_by: user.email, reviewed_at: new Date().toISOString() } }).eq('id', job.id)
+      // a new cut of a Ready product replaces the old one: earlier finished files go to finished/Earlier drafts
+      if (job.input?.from_status === 'ready') {
+        const mine = new Set(Object.values((job.output?.media ?? {}) as Record<string, string>))
+        const { data: old } = await db.from('media').select('id').eq('product_id', job.product_id)
+          .in('kind', ['finished_vertical', 'finished_horizontal', 'thumbnail'])
+        await shelveMedia(db, job.product_id, (old ?? []).map((m) => m.id).filter((id) => !mine.has(id)))
+        const { data: earlier } = await db.from('jobs').select('id,output').eq('product_id', job.product_id).eq('type', 'edit').neq('id', job.id)
+        for (const e of earlier ?? []) {
+          if (e.output?.media && Object.keys(e.output.media).length) {
+            await db.from('jobs').update({ output: { ...e.output, media: {}, replaced_by: job.id } }).eq('id', e.id)
+          }
+        }
+      }
       await db.from('products').update({ status: 'ready' }).eq('id', job.product_id).in('status', ['filmed', 'editing'])
       return { ok: true }
     }
@@ -147,7 +172,7 @@ serve(async (body, { user, db }) => {
       await shelve(db, job)
       await db.from('jobs').update({ status: 'done', question: null, output: { ...(job.output ?? {}), media: {}, verdict: 'redo', redo_note: note, reviewed_by: user.email, reviewed_at: new Date().toISOString() } }).eq('id', job.id)
       const clipIds = (job.input?.clip_ids as string[] | undefined) ?? undefined
-      return await start(db, user.id, job.product_id, clipIds, note, job.id)
+      return await start(db, user.id, job.product_id, clipIds, note, job.id, job.input?.from_status)
     }
 
     case 'review': {

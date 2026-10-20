@@ -90,6 +90,7 @@ export function Home() {
               </Link>
               <Link to="/products/answers" className="tile-cell tile-cell-ask"><b>{flow.answers}</b><span>{flow.answers === 1 ? 'Needs an answer' : 'Need answers'}</span></Link>
             </div>
+            <Link to="/products/completed" className="tile-done"><b>{flow.completed.length.toLocaleString()}</b><span>completed</span><span className="tile-done-chev" aria-hidden>›</span></Link>
           </div>
 
           <div className="tile-pair">

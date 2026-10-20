@@ -40,6 +40,7 @@ export interface Flow {
   postDue: number                // ready products with a TikTok Shop deadline within 7 days (the Post badge)
   due: Product[]                 // TikTok Shop deadlines within 7 days, any stage
   editing: Map<string, Job>      // latest active edit job per product
+  completed: { product: Product; lastPosted: string | null; platforms: Platform[] }[]   // done, newest posted first
   all: Product[]
 }
 
@@ -82,8 +83,21 @@ export function buildFlow(data: Snapshot): Flow {
     if (!have || have.created_at < j.created_at) editing.set(j.product_id, j)
   }
 
+  // Completed: posted everywhere, newest post first, with where it is posted
+  const postedOn = new Map<string, { last: string | null; platforms: Set<Platform> }>()
+  for (const po of posts) {
+    if (po.status !== 'posted') continue
+    const e = postedOn.get(po.product_id) ?? { last: null, platforms: new Set<Platform>() }
+    e.platforms.add(po.platform)
+    if (po.posted_at && (!e.last || po.posted_at > e.last)) e.last = po.posted_at
+    postedOn.set(po.product_id, e)
+  }
+  const completed = products.filter((p) => p.status === 'done')
+    .map((p) => ({ product: p, lastPosted: postedOn.get(p.id)?.last ?? null, platforms: PLATFORM_ORDER.filter((pl) => postedOn.get(p.id)?.platforms.has(pl)) }))
+    .sort((a, b) => (b.lastPosted ?? '').localeCompare(a.lastPosted ?? '') || a.product.name.localeCompare(b.product.name))
+
   return {
-    asks, reviews, answers: asks.length + reviews.length,
+    asks, reviews, answers: asks.length + reviews.length, completed,
     film: sorted.filter((p) => p.status === 'received' || p.status === 'expected'),
     edit: sorted.filter((p) => p.status === 'filmed' || p.status === 'editing'),
     post, postCount: ready.length, postDue: dueReady.length,

@@ -508,3 +508,7 @@ a.add-btn { color: #fff; }
 .price-missing { color: var(--muted); font-weight: 600; font-size: 14px; white-space: nowrap; }
 .hk-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .fix-n { color: var(--flag); }
+.tile-done { display: flex; align-items: baseline; gap: 8px; background: color-mix(in srgb, var(--primary-text) 9%, transparent); color: var(--primary-text); border-radius: 16px; padding: 11px 14px; }
+.tile-done b { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+.tile-done span { color: var(--primary-muted); font-size: 14px; }
+.tile-done .tile-done-chev { margin-left: auto; font-size: 20px; }

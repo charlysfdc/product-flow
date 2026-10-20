@@ -5,6 +5,9 @@ import { buildFlow, editLabel, preview, unposted } from '../lib/flow'
 import { PLATFORM_LABEL, STATUS_LABEL } from '../lib/types'
 import { ProductRow, Thumb } from '../components/ProductRow'
 import { ReminderRow } from '../components/ViralVue'
+import { platformList } from '../lib/publish'
+
+const fmtDay = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 
 /** Products: one block per list, in Charly's order; each opens its list. */
 export function Products() {
@@ -43,6 +46,11 @@ export function Products() {
             <span className="block-main"><b>Post {flow.postDue > 0 && <i className="badge-due">{flow.postDue} TikTok due</i>}</b><small>{preview(flow.post.flatMap((g) => g.items).filter((p, i, a) => a.indexOf(p) === i)) || 'Nothing finished is waiting'}</small></span>
             <span className="chev" aria-hidden>›</span>
           </Link>
+          <Link to="/products/completed" className="block">
+            <span className="block-big">{flow.completed.length.toLocaleString()}</span>
+            <span className="block-main"><b>Completed</b><small>{preview(flow.completed.map((c) => c.product)) || 'Nothing posted everywhere yet'}</small></span>
+            <span className="chev" aria-hidden>›</span>
+          </Link>
           <Link to="/products/viralvue" className="block">
             <span className="block-big">{vv.length}</span>
             <span className="block-main"><b>ViralVue updates</b><small>{vv.length ? [received && `${received} Tick Received`, published && `${published} Tick Video published`, message && `${message} Message the brand`].filter(Boolean).join(' · ') : 'Nothing to tick'}</small></span>
@@ -64,7 +72,7 @@ export function Products() {
   )
 }
 
-const TITLES: Record<string, string> = { answers: 'Answers needed', film: 'Film', edit: 'Edit', post: 'Post', viralvue: 'ViralVue updates', all: 'All products' }
+const TITLES: Record<string, string> = { answers: 'Answers needed', film: 'Film', edit: 'Edit', post: 'Post', completed: 'Completed', viralvue: 'ViralVue updates', all: 'All products' }
 
 /** One list from the Products page. Every product row opens the Product screen. */
 export function ProductList() {
@@ -115,6 +123,17 @@ export function ProductList() {
                 <ul className="list">{g.items.map((p) => <ProductRow key={p.id} product={p} detail={g.key === 'due' ? unposted(p, data.listings, data.posts).map((pl) => PLATFORM_LABEL[pl]).join(', ') : null} />)}</ul>
               </section>
             ))}
+          </>
+        )
+      case 'completed':
+        return flow.completed.length === 0 ? <p className="empty">Nothing is posted everywhere yet.</p> : (
+          <>
+            <p className="muted small page-sub">{flow.completed.length.toLocaleString()} posted everywhere · newest post first</p>
+            <ul className="list">
+              {flow.completed.map(({ product: p, lastPosted, platforms }) => (
+                <ProductRow key={p.id} product={p} detail={[platformList(platforms, (pl) => PLATFORM_LABEL[pl]) || 'No post recorded', lastPosted ? `posted ${fmtDay(lastPosted)}` : null].filter(Boolean).join(' · ')} />
+              ))}
+            </ul>
           </>
         )
       case 'viralvue':

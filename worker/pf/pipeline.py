@@ -328,8 +328,7 @@ def spread(overlays: list[tuple[str, float, float]], pieces: list[Piece]) -> Non
         t0 = t1
 
 
-def line_pieces(lines: list[dict], spans: list[tuple[float, float]], clips: dict[str, planner.Clip], vertical: bool,
-                work: Path) -> list[tuple[int, Piece]]:
+def line_pieces(lines: list[dict], spans: list[tuple[float, float]], clips: dict[str, planner.Clip]) -> list[tuple[int, Piece]]:
     """Each line's time shared evenly by its shots; a shot runs from its start on the clip (held on its last frame
     when the clip ends first)."""
     out = []
@@ -343,9 +342,7 @@ def line_pieces(lines: list[dict], spans: list[tuple[float, float]], clips: dict
             b = min(avail, a + d)
             p = Piece(src=c.path, probe=c.probe, a=round(a, 3), b=round(b, 3), rotate=sh.get("rotate", "none"), gain_db=-18.0)
             p.hold = round(max(0.0, d - (b - a)), 3)
-            portrait = c.probe.portrait != (p.rotate in ("left", "right"))
-            if vertical and not portrait and p.rotate == "none":
-                p.cx = face_centre(c, (a + b) / 2, work)
+            # no face reframe here: these shots are about the product, and a face in them is often a stranger
             out.append((k, p))
     return out
 
@@ -410,7 +407,7 @@ def run_voiced(ctx: dict, io: IO, work: Path, music: bool) -> dict:
                 overlays.append((str(png), cs, ce))
             bed, bed_db = voiced.wav, 0.0
         io.progress(f"Rendering the {which} cut", pct + 8, f"{total:.0f} s")
-        lp = line_pieces(lines, spans, by_id, vertical, cw)
+        lp = line_pieces(lines, spans, by_id)
         pieces = [p for _, p in lp]
         if vertical and plan.get("hook"):
             png = cw / "hook.png"

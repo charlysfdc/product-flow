@@ -94,3 +94,12 @@ def wav_array(data: bytes):
     with wave.open(io.BytesIO(data)) as w:
         pcm = w.readframes(w.getnframes())
     return np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+
+
+def duration(path: str) -> float:
+    """Length of any media file (audio too), from `ffmpeg -i`."""
+    err = subprocess.run([FFMPEG, "-hide_banner", "-i", path], capture_output=True, text=True).stderr
+    m = re.search(r"Duration: (\d+):(\d+):([\d.]+)", err)
+    if not m:
+        raise FFError(f"Not a media file ffmpeg can read: {path}")
+    return int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3])

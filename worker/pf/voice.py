@@ -9,7 +9,7 @@ from pathlib import Path
 
 import requests
 
-from .ffx import ff, probe
+from .ffx import duration, ff
 
 VOICE_ID = "96Sqoi9Yf75d9Lu4UGvK"          # "Charly South African"
 VOICE_NAME = "Charly South African"
@@ -65,11 +65,11 @@ def speak(api_key: str, lines: list[str], work: Path, max_s: float) -> Voiced:
     work.mkdir(parents=True, exist_ok=True)
     text = " ".join(l.strip() for l in lines if l.strip())
     al = tts(api_key, text, work / "voice.mp3")
-    raw = probe(str(work / "voice.mp3")).duration
+    raw = duration(str(work / "voice.mp3"))
     sp = round(min(1.2, max(1.0, raw / max_s)), 3)
     wav = work / "voice.wav"
     ff("-i", str(work / "voice.mp3"), "-filter:a", f"atempo={sp}", "-ar", "48000", "-ac", "2", str(wav))
-    dur = probe(str(wav)).duration
+    dur = duration(str(wav))
     words = _words(al, sp)
     # each line's span from its word count; cut points halfway into the pauses between lines (lion.py)
     counts = [len(l.split()) for l in lines if l.strip()]

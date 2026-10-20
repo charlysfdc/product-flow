@@ -7,7 +7,7 @@ import { Thumb } from '../components/ProductRow'
 import { Sheet } from '../components/Sheet'
 
 const words = (lines: string[]) => lines.reduce((n, l) => n + l.split(/\s+/).filter(Boolean).length, 0)
-const seconds = (n: number) => Math.round(n / 2.6)
+const seconds = (n: number) => Math.round(n / 3)   // Charly's cloned voice reads about 3 words a second
 
 /** Voice-over script: Charly reads and edits what their cloned voice will say, line by line, before any audio exists. */
 export function Script() {
@@ -106,8 +106,8 @@ export function Script() {
         Hook on screen: “{plan.hook}”. Name at the end: “{plan.product_label}”.
       </p>
 
-      {block('Vertical · TikTok Shop, Reels', 'Aim for 65–95 words (30–35 s). Never mention Amazon.', vertical, setVertical, plan.vertical)}
-      {block('Horizontal · Amazon review', 'Aim for 150–290 words (1–2 min). No prices, shipping or links.', horizontal, setHorizontal, plan.horizontal)}
+      {block('Vertical · TikTok Shop, Reels', 'Aim for 85–110 words (30–35 s). Never mention Amazon.', vertical, setVertical, plan.vertical)}
+      {block('Horizontal · Amazon review', 'Aim for 190–360 words (1–2 min). No prices, shipping or links.', horizontal, setHorizontal, plan.horizontal)}
 
       {(plan.footage || plan.concerns) && (
         <section>

@@ -8,8 +8,9 @@ import anthropic
 
 from .plan import MODEL, Clip, Usage, _clip_header, transcript_lines
 
-VERTICAL_WORDS = (65, 95)       # about 30-35 s read aloud
-HORIZONTAL_WORDS = (150, 290)   # about 60-120 s
+# Charly's cloned voice reads about 3 words a second (measured 20 Oct 2026: 73 words in 24 s, 179 in 56 s)
+VERTICAL_WORDS = (85, 110)      # about 30-35 s read aloud
+HORIZONTAL_WORDS = (190, 360)   # about 60-120 s
 
 SYSTEM = """You are the video editor and script writer for Charly (AfrikanerinAmerika), an Amazon Influencer and \
 TikTok Shop creator. This product was filmed without talking (or the sound is unusable), so the video is carried \
@@ -21,15 +22,15 @@ The script, in Charly's voice:
 when it fits. Charly is South African, living in America, and films with their daughter Zanje.
 - Say only what the footage, the product details and common sense support. Never invent results, numbers, health \
 claims or experiences that the footage does not show; when unsure, describe what is visible.
-- Vertical: 65-95 words in total (30-35 seconds read aloud). The first line is the hook: the most surprising or \
+- Vertical: 85-110 words in total (30-35 seconds read aloud). The first line is the hook: the most surprising or \
 useful thing, never "hi guys". Name the product near the end. Never mention Amazon.
-- Horizontal (Amazon review): 150-290 words (60-120 seconds). What it is, the clearest demonstration of it working, \
+- Horizontal (Amazon review): 190-360 words (60-120 seconds). What it is, the clearest demonstration of it working, \
 how it is used, and an honest verdict. Amazon does not allow prices, discounts, shipping talk, links or other stores.
 - Write numbers and units the way they are said ("two hours", not "2h"). No emoji, hashtags or stage directions.
 
 Lines and shots: split each script into lines of one or two sentences. Give each line one to three shots: the clip \
 id and the second on that clip's own timeline where the shot starts, so the picture matches what the line says. A \
-line takes about one second per 2.6 words, shared evenly by its shots, so start each shot where enough footage \
+line takes about one second per 3 words, shared evenly by its shots, so start each shot where enough footage \
 follows. Use the contact sheets to pick moments where the product is clearly visible and something happens; vary \
 the shots, and leave out moments where the camera points at nothing. A landscape clip in the vertical cut is \
 reframed on the action automatically. If a clip is filmed sideways, set rotate ("left" turns it 90 degrees \

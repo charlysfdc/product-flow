@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useProduct } from '../lib/data'
 import { supabase } from '../lib/supabase'
 import { writePostCopy } from '../lib/functions'
@@ -25,6 +25,7 @@ const EMPTY_COPY: PostCopy = { amazon_title: '', amazon_description: '', tiktok_
 export function Publish() {
   const { id } = useParams()
   const { detail, error, reload } = useProduct(id)
+  const navigate = useNavigate()
   const [copy, setCopy] = useState<PostCopy | null>(null)
   const [writing, setWriting] = useState(false)
   const [copyNote, setCopyNote] = useState<string | null>(null)
@@ -57,14 +58,6 @@ export function Publish() {
       setWriting(false)
     }
   }, [id])
-
-  // first visit: Claude writes the text without being asked
-  const tried = useRef(false)
-  useEffect(() => {
-    if (!detail || tried.current || detail.product.post_copy) return
-    tried.current = true
-    write(false)
-  }, [detail, write])
 
   const saveCopy = async () => {
     if (!product || !copy) return
@@ -256,12 +249,16 @@ export function Publish() {
   return (
     <main>
       <div className="pn">
-        <Link to={`/product/${p.id}`} className="bk" aria-label="Product">‹</Link>
-        <Thumb src={p.product_image_url} name={p.name} />
-        <div style={{ minWidth: 0 }}>
-          <h1>{p.name}</h1>
-          <small>Post it · {rows.filter((r) => r.state === 'posted').length}/{rows.length} posted{totalViews ? ` · ${totalViews.toLocaleString()} views` : ''}</small>
-        </div>
+        {/* back to wherever this screen was opened from; the Product screen when it was opened directly */}
+        <button className="bk bk-btn" aria-label="Back" onClick={() => ((window.history.state?.idx ?? 0) > 0 ? navigate(-1) : navigate(`/product/${p.id}`))}>‹</button>
+        <Link to={`/product/${p.id}`} className="pn-link">
+          <Thumb src={p.product_image_url} name={p.name} />
+          <div style={{ minWidth: 0 }}>
+            <h1>{p.name}</h1>
+            <small>Post it · {rows.filter((r) => r.state === 'posted').length}/{rows.length} posted{totalViews ? ` · ${totalViews.toLocaleString()} views` : ''}</small>
+          </div>
+        </Link>
+        <Link to={`/product/${p.id}`} className="pn-details">Product details ›</Link>
       </div>
 
       {notice && <div className="notice"><span>{notice}</span><button onClick={() => setNotice(null)}>OK</button></div>}
@@ -286,7 +283,15 @@ export function Publish() {
           <span className="pub-name">Text to paste</span>
           <span className="pub-where">{writing ? 'Claude is writing…' : copy?.generated_at ? 'Written by Claude, yours to edit' : ''}</span>
         </div>
-        {writing && !copy ? <p className="muted small">Claude is reading what was said in the edit and writing the Amazon title, description and TikTok caption…</p> : (
+        {!copy ? (
+          <>
+            <p className="muted small">{writing
+              ? 'Claude is reading what was said in the edit and writing the Amazon title, description and TikTok caption…'
+              : 'Claude writes the Amazon title and description and a TikTok caption from what was said in the edit. Nothing is written until you tap.'}</p>
+            <button className="primary" disabled={writing} onClick={() => write(false)}>{writing ? 'Writing…' : 'Write the text'}</button>
+            {!writing && <button className="link" onClick={() => setCopy(EMPTY_COPY)}>Write it myself</button>}
+          </>
+        ) : (
           <>
             <CopyField label="Amazon title" max={60} value={c.amazon_title} onChange={(v) => setCopy({ ...c, amazon_title: v })} onSave={saveCopy} />
             <CopyField label="Amazon description" rows={4} value={c.amazon_description} onChange={(v) => setCopy({ ...c, amazon_description: v })} onSave={saveCopy} />
@@ -295,7 +300,12 @@ export function Publish() {
           </>
         )}
         {copyNote && <p className="cf-hint">{copyNote}</p>}
-        <button className="link" disabled={writing} onClick={() => write(true)}>{writing ? 'Writing…' : copy?.generated_at ? 'Write it again' : 'Write with Claude'}</button>
+        {copy && (
+          <button className="link" disabled={writing} onClick={() => {
+            if (copy.edited_at && !window.confirm('Write it again? Claude replaces the text, including your edits.')) return
+            write(true)
+          }}>{writing ? 'Writing…' : copy.generated_at ? 'Write it again' : 'Write it with Claude'}</button>
+        )}
       </section>
 
       {cards}

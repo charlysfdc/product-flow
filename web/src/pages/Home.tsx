@@ -277,7 +277,7 @@ export function Home() {
               {() => view.ready.map((g) => (
                 <div key={g.key}>
                   <h3>{g.label}</h3>
-                  <ul className="list">{g.items.map((p) => <ProductRow key={p.id} product={p} to={`/publish/${p.id}`} detail={g.key === 'due' ? unposted(p, data!.listings, data!.posts).map((pl) => PLATFORM_LABEL[pl]).join(', ') : null} />)}</ul>
+                  <ul className="list">{g.items.map((p) => <ProductRow key={p.id} product={p} detail={g.key === 'due' ? unposted(p, data!.listings, data!.posts).map((pl) => PLATFORM_LABEL[pl]).join(', ') : null} />)}</ul>
                 </div>
               ))}
             </Section>

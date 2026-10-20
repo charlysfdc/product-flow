@@ -31,10 +31,13 @@ export interface Purchase {
   ask_product_id: string | null
 }
 
+export interface PurchaseLink { asin: string; via: 'exact' | 'same_as' | 'auto'; listing_id: string | null }
+
 export interface PurchaseChange {
   at: string
   before: Partial<Pick<Product, 'source' | 'price' | 'received_at' | 'received_estimated'>>
   after: Partial<Pick<Product, 'source' | 'price' | 'received_at' | 'received_estimated'>>
+  links?: PurchaseLink[]     // which order ASINs were linked, how, and the Amazon listing added for it
 }
 
 export const isPurchasesExport = (csvText: string) => {
@@ -98,6 +101,7 @@ export interface PurchasesSummary {
   reviewCandidates: number
   total: number
   sortedByClaude: number
+  autoLinked: number
   errors: string[]
 }
 
@@ -111,7 +115,7 @@ export async function importPurchases(client: SupabaseClient, csvText: string, c
   const s: PurchasesSummary = {
     rows: rows.length, added: 0, already: 0, matchedProducts: 0, changed: { source: 0, price: 0, date: 0, products: 0 },
     questions: 0, buckets: { review: 0, supplies: 0, household: 0, subscription: 0, unsorted: 0 }, reviewCandidates: 0,
-    total: Math.round(rows.reduce((n, r) => n + (r.unit_price ?? 0) * r.quantity, 0) * 100) / 100, sortedByClaude: 0, errors: [],
+    total: Math.round(rows.reduce((n, r) => n + (r.unit_price ?? 0) * r.quantity, 0) * 100) / 100, sortedByClaude: 0, autoLinked: 0, errors: [],
   }
   if (!rows.length) return s
 
@@ -153,38 +157,24 @@ export async function importPurchases(client: SupabaseClient, csvText: string, c
     s.matchedProducts++
     if (!open.length) continue
     try {
-      if (hasDeal.has(product.id)) {
-        // a sample deal AND an order: Charly decides (Sample / Bought / Both)
-        const { error } = await client.from('purchases').update({ ask_product_id: product.id, bucket: 'review', bucket_by: 'match' }).in('id', open.map((b) => b.id))
-        if (error) throw error
-        s.questions++
-        continue
-      }
-      const first = [...buys].sort((a, b) => (a.order_date ?? '9999').localeCompare(b.order_date ?? '9999'))[0]
-      const before: PurchaseChange['before'] = {}
-      const after: PurchaseChange['after'] = {}
-      if (product.source === 'amazon_sample' || product.source === 'unknown') { before.source = product.source; after.source = 'bought' as ProductSource; s.changed.source++ }
-      if (first.unit_price != null && Number(product.price ?? NaN) !== Number(first.unit_price)) { before.price = product.price ?? null; after.price = Number(first.unit_price); s.changed.price++ }
-      if (first.order_date && (!product.received_at || product.received_estimated || product.received_at > first.order_date)) {
-        if (product.received_at !== first.order_date || product.received_estimated) {
-          before.received_at = product.received_at; before.received_estimated = Boolean(product.received_estimated)
-          after.received_at = first.order_date; after.received_estimated = false
-          s.changed.date++
-        }
-      }
-      if (Object.keys(after).length) {
-        // a second import keeps the first "before", so Undo always goes back to how it was
-        const prev = product.purchase_change as PurchaseChange | null | undefined
-        const change: PurchaseChange = { at: today(), before: { ...before, ...(prev?.before ?? {}) }, after: { ...(prev?.after ?? {}), ...after } }
-        const { error } = await client.from('products').update({ ...after, purchase_change: change }).eq('id', product.id)
-        if (error) throw error
-        s.changed.products++
-      }
-      const { error } = await client.from('purchases').update({ product_id: product.id, link_kind: 'bought', bucket: 'review', bucket_by: 'match' }).in('id', open.map((b) => b.id))
-      if (error) throw error
+      const r = await applyMatch(client, product, buys, open, hasDeal.has(product.id), { asin, via: 'exact', listing_id: null })
+      if (r.question) s.questions++
+      if (r.changed.products) { s.changed.products++; s.changed.source += r.changed.source; s.changed.price += r.changed.price; s.changed.date += r.changed.date }
     } catch (e) {
       s.errors.push(`${product.name}: ${(e as Error).message}`)
     }
+  }
+
+  // no exact ASIN: a strong look-alike (brand and 2+ title words, or the folder name) is linked too,
+  // recorded so What the import changed can undo it
+  say('Looking for the same product under another ASIN…')
+  try {
+    const auto = await recheckMatches(client)
+    s.autoLinked = auto.linked
+    s.questions += auto.questions
+    s.changed.products += auto.changed
+  } catch (e) {
+    s.errors.push(`Look-alike matches: ${(e as Error).message}`)
   }
 
   // buckets for what matched nothing: Amazon's category, then Claude, one call per 120 ASINs
@@ -228,6 +218,146 @@ export async function importPurchases(client: SupabaseClient, csvText: string, c
   return s
 }
 
+/**
+ * The rules for a purchase that is this product (exact ASIN, "Same as", or a strong look-alike): with a deal,
+ * the "Sample or bought?" question; without, source Bought, the price paid and the earliest order date.
+ * Every change and the link are recorded in purchase_change for Undo.
+ */
+export async function applyMatch(client: SupabaseClient, product: Product, buys: Purchase[], open: Purchase[], hasDeal: boolean, link: PurchaseLink) {
+  const changed = { source: 0, price: 0, date: 0, products: 0 }
+  const prev = product.purchase_change as PurchaseChange | null | undefined
+  const links = [...(prev?.links ?? []).filter((l) => l.asin !== link.asin), link]
+  if (hasDeal) {
+    const { error } = await client.from('purchases').update({ ask_product_id: product.id, bucket: 'review', bucket_by: 'match' }).in('id', open.map((b) => b.id))
+    if (error) throw new Error(error.message)
+    if (link.via !== 'exact') {
+      const { error: e2 } = await client.from('products').update({ purchase_change: { at: today(), before: prev?.before ?? {}, after: prev?.after ?? {}, links } }).eq('id', product.id)
+      if (e2) throw new Error(e2.message)
+    }
+    return { question: true, changed }
+  }
+  const first = [...buys].sort((a, b) => (a.order_date ?? '9999').localeCompare(b.order_date ?? '9999'))[0]
+  const before: PurchaseChange['before'] = {}
+  const after: PurchaseChange['after'] = {}
+  if (product.source === 'amazon_sample' || product.source === 'unknown') { before.source = product.source; after.source = 'bought' as ProductSource; changed.source++ }
+  if (first.unit_price != null && Number(product.price ?? NaN) !== Number(first.unit_price)) { before.price = product.price ?? null; after.price = Number(first.unit_price); changed.price++ }
+  if (first.order_date && (!product.received_at || product.received_estimated || product.received_at > first.order_date)) {
+    if (product.received_at !== first.order_date || product.received_estimated) {
+      before.received_at = product.received_at; before.received_estimated = Boolean(product.received_estimated)
+      after.received_at = first.order_date; after.received_estimated = false
+      changed.date++
+    }
+  }
+  if (Object.keys(after).length || link.via !== 'exact') {
+    // a later import keeps the first "before", so Undo always goes back to how it was
+    const change: PurchaseChange = { at: today(), before: { ...before, ...(prev?.before ?? {}) }, after: { ...(prev?.after ?? {}), ...after }, links }
+    const { error } = await client.from('products').update({ ...after, purchase_change: change }).eq('id', product.id)
+    if (error) throw new Error(error.message)
+    changed.products = 1
+  }
+  const { error } = await client.from('purchases').update({ product_id: product.id, link_kind: 'bought', bucket: 'review', bucket_by: link.via === 'exact' ? 'match' : link.via === 'auto' ? 'match' : 'manual' }).in('id', open.map((b) => b.id))
+  if (error) throw new Error(error.message)
+  return { question: false, changed }
+}
+
+// ---- the same product under another ASIN ("Same as") -------------------------------
+
+const STOP = new Set(['with', 'from', 'that', 'this', 'pack', 'inch', 'inches', 'piece', 'pieces', 'pcs', 'size', 'large', 'small', 'women', 'men', 'kids', 'adult', 'adults', 'black', 'white', 'blue', 'gift', 'gifts', 'set', 'kit', 'new', 'and', 'the', 'for', 'count', 'ounce', 'oz', 'fl', 'premium', 'professional', 'portable', 'upgraded', 'compatible', 'home', 'use'])
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+const words = (s: string | null | undefined) => (s ?? '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3 && !STOP.has(w))
+
+export interface MatchContext {
+  products: Product[]                  // not hidden
+  folderOf: Map<string, string[]>      // product id → its folder names (drive_folder_name + extras)
+  dealTitles: Map<string, string[]>    // product id → titles of its brand deals
+  hasDeal: Set<string>
+}
+
+export interface Suggestion { product: Product; score: number; strong: boolean; why: string }
+
+/** Products that look like this purchase: brand + title words against names, folders, brands, deal titles. */
+export function suggestFor(title: string | null, ctx: MatchContext, limit = 3): Suggestion[] {
+  const t = (title ?? '').toLowerCase()
+  const nt = norm(title ?? '')
+  const tw = Array.from(new Set(words(title)))
+  if (!t || !tw.length) return []
+  const out: Suggestion[] = []
+  for (const p of ctx.products) {
+    const names = [p.name, ...(ctx.folderOf.get(p.id) ?? [])].map((x) => x.toLowerCase())
+    const hay = new Set(words([...names, ...(ctx.dealTitles.get(p.id) ?? [])].join(' ')))
+    const brand = (p.brand ?? '').toLowerCase().trim()
+    const brandHit = brand.length >= 3 && new RegExp(`\\b${brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(t)
+    const hits = tw.filter((w) => hay.has(w)).length
+    // the product's own name or folder inside the order title: as a phrase, or 3+ significant words all there
+    const folderHit = names.some((n) => {
+      const nn = norm(n), nw = words(n)
+      return (nn.split(' ').length >= 2 && nw.length >= 2 && ` ${nt} `.includes(` ${nn} `)) || (nw.length >= 3 && nw.every((w) => tw.includes(w)))
+    })
+    const ok = folderHit || (brandHit && hits >= 1) || hits >= 2
+    if (!ok) continue
+    const strong = folderHit || (brandHit && hits >= 2)
+    out.push({ product: p, score: (folderHit ? 20 : 0) + (brandHit ? 10 : 0) + hits, strong, why: folderHit ? 'same name' : brandHit ? `${p.brand} + ${hits} word${hits === 1 ? '' : 's'}` : `${hits} words` })
+  }
+  return out.sort((a, b) => b.score - a.score).slice(0, limit)
+}
+
+export async function matchContext(client: SupabaseClient): Promise<MatchContext> {
+  const products = (await selectAll<Product>((a, b) => client.from('products').select('*').range(a, b))).filter((p) => !p.archived_at)
+  const deals = await selectAll<{ product_id: string; title: string | null }>((a, b) => client.from('deals').select('product_id,title').not('product_id', 'is', null).range(a, b))
+  const folderOf = new Map(products.map((p) => [p.id, [p.drive_folder_name, ...(p.extra_drive_folders ?? []).map((f) => f.name)].filter((x): x is string => Boolean(x))]))
+  const dealTitles = new Map<string, string[]>()
+  for (const d of deals) {
+    if (!dealTitles.has(d.product_id)) dealTitles.set(d.product_id, [])
+    if (d.title) dealTitles.get(d.product_id)!.push(d.title)
+  }
+  return { products, folderOf, dealTitles, hasDeal: new Set(deals.map((d) => d.product_id)) }
+}
+
+/** "Same as <product>": link this ASIN's orders, add the ASIN as an extra Amazon US listing, then the usual rules. */
+export async function linkSameAs(client: SupabaseClient, product: Product, asin: string, hasDeal: boolean, via: 'same_as' | 'auto' = 'same_as') {
+  const { data: buys, error } = await client.from('purchases').select('*').eq('asin', asin)
+  if (error) throw new Error(error.message)
+  const open = ((buys ?? []) as Purchase[]).filter((b) => !b.product_id && !b.ask_product_id)
+  if (!open.length) return { question: false, changed: { source: 0, price: 0, date: 0, products: 0 } }
+  let listingId: string | null = null
+  const { data: have } = await client.from('listings').select('id').eq('product_id', product.id).eq('platform', 'amazon_us').eq('external_id', asin).limit(1)
+  if (!have?.length) {
+    const ins = await client.from('listings').insert({
+      product_id: product.id, platform: 'amazon_us', external_id: asin, url: `https://www.amazon.com/dp/${asin}`,
+      availability: 'exact', availability_note: 'Another listing of it (Amazon order)', checked_at: new Date().toISOString().slice(0, 10),
+    }).select('id').single()
+    if (ins.error) throw new Error(ins.error.message)
+    listingId = ins.data.id
+  }
+  // the product as it is now (an earlier link may have changed it)
+  const { data: fresh } = await client.from('products').select('*').eq('id', product.id).single()
+  return applyMatch(client, (fresh ?? product) as Product, buys as Purchase[], open, hasDeal, { asin, via, listing_id: listingId })
+}
+
+/**
+ * Re-check matches: unlinked review and unsorted orders whose best look-alike is strong and clearly ahead of
+ * the next are linked (never ones Charly sorted by hand).
+ */
+export async function recheckMatches(client: SupabaseClient): Promise<{ linked: number; questions: number; changed: number }> {
+  const all = await selectAll<Purchase>((a, b) => client.from('purchases').select('*').range(a, b))
+  const open = all.filter((p) => !p.product_id && !p.ask_product_id && p.bucket_by !== 'manual' && (p.bucket === 'review' || p.bucket === 'unsorted'))
+  const res = { linked: 0, questions: 0, changed: 0 }
+  if (!open.length) return res
+  const ctx = await matchContext(client)
+  const done = new Set<string>()
+  for (const pu of open) {
+    if (done.has(pu.asin)) continue
+    done.add(pu.asin)
+    const [best, next] = suggestFor(pu.title, ctx, 2)
+    if (!best?.strong || (next && next.strong && next.score >= best.score - 2)) continue
+    const r = await linkSameAs(client, best.product, pu.asin, ctx.hasDeal.has(best.product.id), 'auto')
+    res.linked++
+    if (r.question) res.questions++
+    if (r.changed.products) res.changed++
+  }
+  return res
+}
+
 function groupBy(pairs: [string, Bucket][]): Map<Bucket, string[]> {
   const m = new Map<Bucket, string[]>()
   for (const [asin, b] of pairs) {
@@ -253,7 +383,14 @@ export async function undoPurchaseChange(client: SupabaseClient, p: Product): Pr
   }
   const { error } = await client.from('products').update(patch).eq('id', p.id)
   if (error) throw new Error(error.message)
-  // the orders stay with the product as re-buys, so a later import doesn't match and change it again
+  // "Same as" and look-alike links: the orders go back to the list (sorted by hand, so never auto-linked
+  // again) and the Amazon listing added for them is removed
+  for (const l of (ch.links ?? []).filter((x) => x.via !== 'exact')) {
+    const un = await client.from('purchases').update({ product_id: null, ask_product_id: null, link_kind: null, bucket: 'review', bucket_by: 'manual' }).eq('asin', l.asin).or(`product_id.eq.${p.id},ask_product_id.eq.${p.id}`)
+    if (un.error) throw new Error(un.error.message)
+    if (l.listing_id) await client.from('listings').delete().eq('id', l.listing_id)
+  }
+  // exact matches: the orders stay with the product as re-buys, so a later import doesn't change it again
   const un = await client.from('purchases').update({ link_kind: 'rebuy', bucket: 'household', bucket_by: 'manual' }).eq('product_id', p.id).eq('link_kind', 'bought')
   if (un.error) throw new Error(un.error.message)
   return kept

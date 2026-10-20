@@ -538,3 +538,8 @@ a.add-btn { color: #fff; }
 .facts-light dt { color: var(--primary-muted); }
 .facts-light dd { color: var(--primary-text); }
 .gap-fix select { font: inherit; font-size: 15px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+.same-row { margin-bottom: 6px; }
+.same-btn { font-size: 14px; padding: 8px 11px; text-align: left; }
+.same-strong { border-color: var(--done); }
+.same-confirm { padding: 0 16px 6px; }
+.same-confirm p { margin: 0 0 6px; }

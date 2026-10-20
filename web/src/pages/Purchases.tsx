@@ -5,8 +5,8 @@ import { useSnapshot, type Snapshot } from '../lib/data'
 import { callFunction, makeDriveFolder } from '../lib/functions'
 import { lookupLink } from '../lib/amazon'
 import {
-  BUCKET_LABEL, answerPurchase, byAsinGroups, importPurchases, isPurchasesExport, setBucket, undoPurchaseChange,
-  type Bucket, type Purchase, type PurchasesSummary,
+  BUCKET_LABEL, answerPurchase, byAsinGroups, importPurchases, isPurchasesExport, linkSameAs, matchContext, recheckMatches, setBucket, suggestFor, undoPurchaseChange,
+  type Bucket, type MatchContext, type Purchase, type PurchasesSummary,
 } from '../lib/purchases'
 import { SOURCE_LABEL, fmtPrice, type Product } from '../lib/types'
 import { money } from '../lib/flow'
@@ -62,7 +62,8 @@ export function PurchasesCard({ data, onDone }: { data: Snapshot | null; onDone:
             <p className="muted small">
               {summary.matchedProducts} products matched by ASIN; {summary.changed.products} changed ({summary.changed.source} source → Bought, {summary.changed.price} price, {summary.changed.date} received date);
               {' '}{summary.questions} need “Sample or bought?”. Buckets: {(Object.keys(summary.buckets) as Bucket[]).filter((b) => summary.buckets[b]).map((b) => `${summary.buckets[b]} ${BUCKET_LABEL[b].toLowerCase()}`).join(', ')}
-              {summary.sortedByClaude ? ` (${summary.sortedByClaude} items sorted by Claude)` : ''}; {summary.reviewCandidates} review candidates.
+              {summary.sortedByClaude ? ` (${summary.sortedByClaude} items sorted by Claude)` : ''}; {summary.reviewCandidates} review candidates
+              {summary.autoLinked ? `; ${summary.autoLinked} linked to a product under another ASIN` : ''}.
             </p>
             {summary.errors.length > 0 && <details><summary className="error">{summary.errors.length} problems</summary><ul>{summary.errors.map((e, i) => <li key={i} className="small">{e}</li>)}</ul></details>}
           </div>
@@ -96,6 +97,11 @@ export function PurchasesPage() {
   const [busy, setBusy] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const byId = useMemo(() => new Map((data?.products ?? []).map((p) => [p.id, p])), [data])
+  // look-alike products for orders with no product: names, folders, brands and deal titles
+  const [ctx, setCtx] = useState<MatchContext | null>(null)
+  const [tick, setTick] = useState(0)
+  useEffect(() => { matchContext(supabase).then(setCtx, () => setCtx(null)) }, [tick])
+  const [confirm, setConfirm] = useState<{ asin: string; product: Product } | null>(null)
   if (error) return <main><Link to="/housekeeping" className="back">‹ Housekeeping</Link><p className="error">{error}</p></main>
   if (!data) return <main><Link to="/housekeeping" className="back">‹ Housekeeping</Link><p className="muted">Loading…</p></main>
   const reviewOnly = bucket === 'review'
@@ -128,6 +134,25 @@ export function PurchasesPage() {
       setBusy(null)
     }
   }
+  const sameAs = async (asin: string, product: Product) => {
+    setBusy(asin); setNote(null)
+    try {
+      const r = await linkSameAs(supabase, product, asin, ctx?.hasDeal.has(product.id) ?? false)
+      setConfirm(null)
+      setNote(r.question
+        ? `Linked to ${product.name}. It also has a brand deal, so it waits under Answers needed: Sample or bought?`
+        : `Linked to ${product.name}${r.changed.products ? ' and updated (see What the import changed, where Undo puts it back)' : ''}.`)
+      reload(); setTick((t) => t + 1)
+    } catch (e) { setNote(`Could not link it: ${(e as Error).message}`) } finally { setBusy(null) }
+  }
+  const recheck = async () => {
+    setBusy('recheck'); setNote(null)
+    try {
+      const r = await recheckMatches(supabase)
+      setNote(r.linked ? `Linked ${r.linked} order item${r.linked === 1 ? '' : 's'} to products that are clearly the same (${r.changed} updated, ${r.questions} now ask Sample or bought?). They are listed in What the import changed.` : 'No clear matches found; use Same as on a row.')
+      reload(); setTick((t) => t + 1)
+    } catch (e) { setNote((e as Error).message) } finally { setBusy(null) }
+  }
   const move = async (asin: string, b: Bucket) => {
     setBusy(asin)
     try { await setBucket(supabase, asin, b); reload() } catch (e) { setNote((e as Error).message) } finally { setBusy(null) }
@@ -143,6 +168,9 @@ export function PurchasesPage() {
           <button key={b} aria-pressed={b === bucket} onClick={() => setParams({ bucket: b })}>{BUCKET_LABEL[b]} {counts[b]}</button>
         ))}
       </div>
+      {(bucket === 'review' || bucket === 'unsorted') && (
+        <div className="actions"><button className="secondary" disabled={busy === 'recheck'} onClick={recheck}>{busy === 'recheck' ? 'Checking…' : 'Re-check matches'}</button></div>
+      )}
       {note && <p className="muted small page-sub">{note}</p>}
       {groups.length === 0 ? <p className="empty">Nothing here.</p> : (
         <ul className="list">
@@ -158,10 +186,38 @@ export function PurchasesPage() {
                     {product && <div className="row-sub"><Link to={`/product/${product.id}`}>{product.name} ›</Link></div>}
                   </div>
                 </div>
+                {!product && ctx && (bucket === 'review' || bucket === 'unsorted') && (() => {
+                  const sugg = suggestFor(g.title, ctx)
+                  if (confirm?.asin === g.asin) {
+                    const c = confirm.product
+                    const deal = ctx.hasDeal.has(c.id)
+                    return (
+                      <div className="same-confirm">
+                        <p className="small"><b>Same as {c.name}?</b> {deal
+                          ? 'It has a brand deal, so it goes to Answers needed: Sample or bought?'
+                          : `It becomes Bought with the price paid and the first order date; ${g.asin} is added as another Amazon listing. Undo is in What the import changed.`}</p>
+                        <div className="gap-fix">
+                          <button className="primary" disabled={busy === g.asin} onClick={() => sameAs(g.asin, c)}>{busy === g.asin ? 'Linking…' : 'Yes, same'}</button>
+                          <button className="link" onClick={() => setConfirm(null)}>Cancel</button>
+                        </div>
+                      </div>
+                    )
+                  }
+                  return sugg.length > 0 && (
+                    <div className="gap-fix same-row">
+                      {sugg.map((x) => (
+                        <button key={x.product.id} className={'secondary same-btn' + (x.strong ? ' same-strong' : '')} onClick={() => setConfirm({ asin: g.asin, product: x.product })}>
+                          Same as {x.product.name}?
+                        </button>
+                      ))}
+                    </div>
+                  )
+                })()}
                 <div className="gap-fix">
                   {reviewOnly ? (
                     <>
                       <button className="secondary" disabled={busy === g.asin} onClick={() => make(g)}>{busy === g.asin ? 'Making…' : 'Make a product'}</button>
+                      <span className="small muted">Not a review product:</span>
                       <button className="secondary" disabled={busy === g.asin} onClick={() => move(g.asin, 'household')}>Household</button>
                       <button className="secondary" disabled={busy === g.asin} onClick={() => move(g.asin, 'supplies')}>Supplies</button>
                     </>
@@ -217,6 +273,9 @@ export function PurchaseChanges() {
                   <Thumb src={p.product_image_url} name={p.name} />
                   <div className="row-main">
                     <div className="row-title">{p.name}</div>
+                    {(ch.links ?? []).filter((l) => l.via !== 'exact').map((l) => (
+                      <div key={l.asin} className="row-sub"><span>Order {l.asin} linked {l.via === 'auto' ? 'automatically (looks the same)' : 'by Same as'}</span></div>
+                    ))}
                     {Object.keys(ch.after).filter((k) => k !== 'received_estimated').map((k) => (
                       <div key={k} className="row-sub"><span>{FIELD_LABEL[k] ?? k}: {show(k, ch.before[k])} → <b>{show(k, ch.after[k])}</b></span></div>
                     ))}

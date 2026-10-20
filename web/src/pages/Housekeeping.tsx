@@ -9,6 +9,8 @@ import { FIX_LABEL, fixups, type FixKind } from '../lib/flow'
 import { ARCHIVE_REASON_LABEL, type Product } from '../lib/types'
 import { ProductRow, Thumb } from '../components/ProductRow'
 import { FindAmazonSheet } from '../components/FindAmazon'
+import { applyCandidate, lookupLink } from '../lib/amazon'
+import type { Listing } from '../lib/types'
 import { PurchasesCard } from './Purchases'
 
 const fmtDay = (d: string | null | undefined) => (d ? new Date(d.length === 10 ? d + 'T00:00:00' : d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'never')
@@ -188,6 +190,8 @@ export function FixList() {
           )}
         </>
       ) : fix[k].length === 0 ? <p className="empty">Nothing to fix.</p> : k === 'details' ? (
+        <>
+        <BulkPictures products={fix.details.filter((p) => !p.product_image_url)} listings={data!.listings} onChange={reload} />
         <ul className="list">
           {fix.details.map((p, i) => {
             const onAmazon = data!.listings.some((l) => l.product_id === p.id && l.platform === 'amazon_us')
@@ -202,6 +206,7 @@ export function FixList() {
             )
           })}
         </ul>
+        </>
       ) : (
         <ul className="list">{fix[k].map((p) => <ProductRow key={p.id} product={p} showStatus />)}</ul>
       )}
@@ -271,5 +276,70 @@ export function HiddenPage() {
         </ul>
       )}
     </main>
+  )
+}
+
+/**
+ * Fetch pictures: products with an Amazon US listing but no picture, one at a time about 1.5 s apart
+ * (so Amazon and the reader proxy don't block), each ASIN tried until one gives a picture. Fills the
+ * picture, and brand and price only when empty. Never replaces a picture. Stop at any time.
+ */
+function BulkPictures({ products, listings, onChange }: { products: Product[]; listings: Listing[]; onChange: () => void }) {
+  const todo = products.filter((p) => listings.some((l) => l.product_id === p.id && l.platform === 'amazon_us' && l.external_id))
+  const [run, setRun] = useState<{ at: number; of: number; filled: number; none: number; blocked: number; name: string } | null>(null)
+  const [done, setDone] = useState<{ filled: number; none: number; blocked: number; stopped: boolean } | null>(null)
+  const stop = useRef(false)
+  if (!todo.length && !run && !done) return null
+
+  const start = async () => {
+    stop.current = false
+    setDone(null)
+    const list = [...todo]
+    const t = { filled: 0, none: 0, blocked: 0 }
+    for (let i = 0; i < list.length && !stop.current; i++) {
+      const p = list[i]
+      setRun({ at: i + 1, of: list.length, ...t, name: p.name })
+      const asins = listings.filter((l) => l.product_id === p.id && l.platform === 'amazon_us' && l.external_id).map((l) => l.external_id!)
+      let got = false, wasBlocked = false
+      for (const asin of asins) {
+        try {
+          const c = await lookupLink(asin)
+          if (c.image_url) {
+            await applyCandidate(p, { ...c, asin })   // fills only what is empty; the listing is already there
+            got = true
+            break
+          }
+        } catch (e) {
+          if (/blocked|did not show|captcha|try again/i.test((e as Error).message)) wasBlocked = true
+        }
+        await new Promise((r) => setTimeout(r, 1500))
+      }
+      if (got) t.filled++
+      else if (wasBlocked) t.blocked++
+      else t.none++
+      if (got && (i + 1) % 5 === 0) onChange()
+      await new Promise((r) => setTimeout(r, 1500))
+    }
+    setRun(null)
+    setDone({ ...t, stopped: stop.current })
+    onChange()
+  }
+
+  return (
+    <div className="bulk">
+      {run ? (
+        <>
+          <div className="sv-head"><span>{run.at} of {run.of}: {run.name}</span><span>{Math.round(((run.at - 1) / run.of) * 100)}%</span></div>
+          <div className="bar"><i style={{ width: `${((run.at - 1) / run.of) * 100}%` }} /></div>
+          <div className="sv-foot"><span>{run.filled} filled · {run.none} no picture · {run.blocked} blocked</span><button className="link" onClick={() => { stop.current = true }}>Stop</button></div>
+        </>
+      ) : (
+        <>
+          {todo.length > 0 && <button className="primary" onClick={start}>Fetch pictures ({todo.length})</button>}
+          <p className="muted small">For products that already have an ASIN: the picture comes from the Amazon page, one product every few seconds. Brand and price are filled only when empty.</p>
+        </>
+      )}
+      {done && <p className="sv-ok">{done.stopped ? 'Stopped. ' : 'Done. '}{done.filled} filled, {done.none} no picture found, {done.blocked} blocked by Amazon{done.blocked ? ' (try again later, or Find on Amazon)' : ''}.</p>}
+    </div>
   )
 }

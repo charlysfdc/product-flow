@@ -546,3 +546,5 @@ a.add-btn { color: #fff; }
 .fix-more { margin-top: 16px; }
 .fix-more summary { cursor: pointer; font-weight: 700; padding: 8px 4px; display: flex; align-items: center; gap: 8px; }
 .fix-more p { margin: 0 4px 8px; }
+.bulk { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 12px; }
+.bulk p { margin: 0 4px; }

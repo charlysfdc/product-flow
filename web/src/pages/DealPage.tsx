@@ -39,7 +39,7 @@ export function DealPage() {
 
   useEffect(() => {
     if (all || !deal || deal.product_id || deal.match_status === 'ignored') return
-    selectAll<Product>((a, b) => supabase.from('products').select('*').order('name').range(a, b)).then(setAll)
+    selectAll<Product>((a, b) => supabase.from('products').select('*').order('name').range(a, b)).then((rows) => setAll(rows.filter((x) => !x.archived_at)))
   }, [all, deal])
 
   // Home's "Yes, same" opens straight on the confirm step for the suggested product

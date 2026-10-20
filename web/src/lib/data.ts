@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from './supabase'
-import { ACTIVE_DEAL_STATUSES, quietCutoffIso, type Deal, type Job, type Listing, type Media, type Post, type Product, type ViralVueReminder } from './types'
+import { ACTIVE_DEAL_STATUSES, isHidden, quietCutoffIso, type Deal, type Job, type Listing, type Media, type Post, type Product, type ViralVueReminder } from './types'
 import { openReminders } from './viralvue'
 
 export interface Snapshot {
-  products: Product[]
+  products: Product[]    // in the flow (hidden ones left out)
+  hidden: Product[]      // Not a product review (migration 0008): only search with Show hidden
   listings: Listing[]
   posts: Post[]
   jobs: Job[]
@@ -43,15 +44,19 @@ export function useSnapshot() {
       return
     }
     setError(null)
+    const all = (p.data ?? []) as Product[]
+    const hidden = all.filter(isHidden)
+    const hiddenIds = new Set(hidden.map((x) => x.id))
     setData({
-      products: (p.data ?? []) as Product[],
+      products: all.filter((x) => !isHidden(x)),
+      hidden,
       listings: (l.data ?? []) as Listing[],
       posts: (po.data ?? []) as Post[],
       jobs: (j.data ?? []) as Job[],
       deals: (d.error ? [] : (d.data ?? [])) as Deal[],
       waiting: w.count ?? 0,
       quiet: Math.max(0, (wAll.count ?? 0) - (w.count ?? 0)),
-      reminders: vv,
+      reminders: vv.filter((r) => !r.deal?.product_id || !hiddenIds.has(r.deal.product_id)),
     })
   }, [])
 

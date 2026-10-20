@@ -38,7 +38,7 @@ export function ProductRow({ product, detail, showStatus, to }: { product: Produ
           <div className="row-sub">
             {product.brand && <span>{product.brand}</span>}
             {detail && <span>{detail}</span>}
-            {showStatus && <span>{STATUS_LABEL[product.status]}</span>}
+            {showStatus && <span>{product.archived_at ? 'Hidden' : STATUS_LABEL[product.status]}</span>}
           </div>
         </div>
         {due && <span className={'due' + (n !== null && n <= 2 ? ' due-hot' : '')}>{due}</span>}

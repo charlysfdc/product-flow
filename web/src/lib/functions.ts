@@ -98,3 +98,11 @@ export interface FinishedFile { media_id: string; drive_file_id: string; filenam
 /** A signed link (valid 6 hours) to download the finished vertical or horizontal from Drive. */
 export const finishedFile = (productId: string, kind: 'finished_vertical' | 'finished_horizontal') =>
   callFunction<FinishedFile>('publish', { action: 'file', product_id: productId, kind })
+
+/** Not a product review: hide it; `move` puts its Drive folders in Content Library/AiA Life (never made). */
+export const archiveProduct = (productId: string, move: boolean, reason = 'not_a_product') =>
+  callFunction<{ moved: number; folders: number; note: string | null }>('drive', { action: 'archive', product_id: productId, reason, move })
+
+/** Shows a hidden product again and moves its folders back. */
+export const restoreProduct = (productId: string) =>
+  callFunction<{ moved_back: number; note: string | null }>('drive', { action: 'restore', product_id: productId })

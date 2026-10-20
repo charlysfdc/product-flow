@@ -328,7 +328,8 @@ export async function importDeals(client: SupabaseClient, csvText: string, onPro
   for (const l of listings) if (l.external_id && !byAsin.has(l.external_id)) byAsin.set(l.external_id, l.product_id)
   const products = await selectAll<Product>((a, b) => client.from('products').select('*').range(a, b))
   const productById = new Map(products.map((p) => [p.id, p]))
-  const lite: ProductLite[] = products.map((p) => ({ id: p.id, name: p.name, brand: p.brand }))
+  // hidden products (Not a product review) are never suggested as the box a deal sent
+  const lite: ProductLite[] = products.filter((p) => !p.archived_at).map((p) => ({ id: p.id, name: p.name, brand: p.brand }))
 
   // decide each row in memory
   type Decision = { input: DealInput; product_id: string | null; match_status: Deal['match_status']; autoCreate: boolean; suggestion: ProductLite | null }

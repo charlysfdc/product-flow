@@ -5,11 +5,11 @@ import { supabase } from '../lib/supabase'
 import { mergeProducts } from '../lib/merge'
 import {
   AVAILABILITY_LABEL, PLATFORM_LABEL, PLATFORM_ORDER, SOURCE_HELP, SOURCE_LABEL, SOURCE_ORDER,
-  STATUS_HELP, STATUS_LABEL, STATUS_ORDER, driveFolderUrl,
+  ARCHIVE_REASON_LABEL, STATUS_HELP, STATUS_LABEL, STATUS_ORDER, driveFolderUrl,
   type Platform, type Post, type Product, type ProductSource, type ProductStatus,
 } from '../lib/types'
 import { Thumb, deadlineText } from '../components/ProductRow'
-import { makeDriveFolder, syncFromDrive } from '../lib/functions'
+import { archiveProduct, makeDriveFolder, restoreProduct, syncFromDrive } from '../lib/functions'
 import { ClipList, ORIGINAL_TIP, UploadButton, UploadPanel } from '../components/Clips'
 import { useUploads } from '../lib/upload'
 import { Options, Sheet } from '../components/Sheet'
@@ -47,6 +47,7 @@ type SheetKind =
   | { kind: 'merge' }
   | { kind: 'unlink'; deal: Deal }
   | { kind: 'edit' }
+  | { kind: 'hide' }
   | null
 
 export function ProductPage() {
@@ -255,6 +256,20 @@ export function ProductPage() {
 
       {actionError && <p className="error">{actionError}</p>}
 
+      {p.archived_at && (
+        <div className="vv">
+          <span className="eyebrow">Hidden</span>
+          <b className="vv-title">{ARCHIVE_REASON_LABEL[p.archived_reason ?? ''] ?? 'Hidden from the flow'}</b>
+          <p>Left out of Home, Post, search and the ViralVue reminders{p.archived_move?.moved?.length ? `; its footage was moved to AiA Life` : ''}.{p.archived_move?.note ? ` ${p.archived_move.note}` : ''}</p>
+          <div className="go">
+            <button className="pri" disabled={busy} onClick={() => run('Restore', async () => {
+              const r = await restoreProduct(p.id)
+              setActionError(r.note ? `Restored. ${r.note}` : r.moved_back ? 'Restored; the footage is back in Products.' : null)
+            })}>{busy ? 'Restoring…' : 'Restore'}</button>
+          </div>
+        </div>
+      )}
+
       <section className="next">
         <span className="eyebrow">{next.eyebrow}</span>
         <h2>{next.title}</h2>
@@ -429,6 +444,7 @@ export function ProductPage() {
         <h2>Housekeeping</h2>
         <div className="actions">
           <button className="secondary" onClick={() => setSheet({ kind: 'merge' })}>Merge into…</button>
+          {!p.archived_at && <button className="secondary" onClick={() => setSheet({ kind: 'hide' })}>Not a product review</button>}
         </div>
         <p className="muted small" style={{ margin: '0 4px' }}>Use Merge when the same product exists twice: everything moves to the one you pick and this copy is removed.</p>
       </section>
@@ -504,6 +520,19 @@ export function ProductPage() {
         />
       )}
 
+      {sheet?.kind === 'hide' && (
+        <HideSheet
+          product={p}
+          busy={busy}
+          onClose={close}
+          onHide={(move) => run('Hiding', async () => {
+            const r = await archiveProduct(p.id, move)
+            close()
+            navigate('/', { replace: true, state: { notice: `${p.name} is hidden.${r.moved ? ` Footage moved to AiA Life (${r.moved} folder${r.moved === 1 ? '' : 's'}).` : ''}${r.note ? ` ${r.note}` : ''}` } })
+          })}
+        />
+      )}
+
       {sheet?.kind === 'merge' && (
         <MergeSheet source={p} busy={busy} onMerge={doMerge} onClose={close} />
       )}
@@ -562,6 +591,25 @@ function PostSheet({ platform, posts, busy, onSave, onRemove, onClose }: {
           <button type="button" className="link" onClick={() => onRemove(appPost)} disabled={busy}>Not posted after all</button>
         )}
       </form>
+    </Sheet>
+  )
+}
+
+function HideSheet({ product, busy, onHide, onClose }: { product: Product; busy: boolean; onHide: (move: boolean) => void; onClose: () => void }) {
+  const folders = (product.drive_folder_id ? 1 : 0) + (product.extra_drive_folders ?? []).filter((f) => f.id).length
+  const [move, setMove] = useState(folders > 0)
+  return (
+    <Sheet title="Not a product review?" onClose={onClose}>
+      <p><b>{product.name}</b> leaves Home, Post, Due soon, the counts and search, and its ViralVue reminders stop showing. Nothing is deleted; Settings → Hidden can restore it.</p>
+      <label className="toggle">
+        <input type="checkbox" checked={move} disabled={!folders} onChange={(e) => setMove(e.target.checked)} />
+        <span>Also move the footage to AiA Life{folders > 1 ? ` (${folders} folders)` : ''}{!folders ? ' (no Drive folder)' : ''}</span>
+      </label>
+      <p className="muted small">The folder goes from Content Library/Products to Content Library/AiA Life. If there's no AiA Life folder there, the footage stays put.</p>
+      <div className="actions">
+        <button className="primary" disabled={busy} onClick={() => onHide(move)}>{busy ? 'Hiding…' : 'Hide it'}</button>
+        <button className="link" onClick={onClose}>Cancel</button>
+      </div>
     </Sheet>
   )
 }

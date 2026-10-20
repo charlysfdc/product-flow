@@ -18,6 +18,9 @@ export interface Product {
   drive_folder_name: string | null
   extra_drive_folders?: { id: string | null; name: string | null }[]   // migration 0004
   post_copy?: PostCopy | null                                          // migration 0007
+  archived_at?: string | null                                          // migration 0008: hidden from the flow
+  archived_reason?: string | null
+  archived_move?: { moved?: { id: string; name: string; from: string; to: string }[]; note?: string | null; at?: string } | null
   product_image_url: string | null
   received_at: string | null
   notes: string | null
@@ -200,6 +203,11 @@ export function driveFolderUrl(p: { drive_folder_id?: string | null; drive_folde
   if (name) return `https://drive.google.com/drive/search?q=${encodeURIComponent(name)}`
   return null
 }
+
+/** Hidden from the flow (Not a product review). */
+export const isHidden = (p: { archived_at?: string | null }) => Boolean(p.archived_at)
+
+export const ARCHIVE_REASON_LABEL: Record<string, string> = { not_a_product: 'Not a product review' }
 
 export const STATUS_ORDER: ProductStatus[] = ['expected', 'received', 'filmed', 'editing', 'ready', 'done']
 

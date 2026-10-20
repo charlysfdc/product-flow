@@ -7,6 +7,8 @@
 //   { action: 'upload_status', upload_url, size }                          how many bytes Drive has (for resuming)
 //   { action: 'finish_upload', product_id, drive_file_id, ... }            checks the file in Drive, records the clip
 //   { action: 'sync', product_id }                                         records files found in raw/ and finished/
+//   { action: 'archive', product_id, reason, move }   hides the product; move: its folders go from Products to AiA Life
+//   { action: 'restore', product_id }                 shows it again and moves the folders back where Hide took them from
 // The phone uploads clip bytes straight to Drive with the session URL; it never sees the token.
 // The refresh token lives in the google_drive table (service role only).
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.118.0'
@@ -202,6 +204,88 @@ async function listFiles(token: string, folderId: string): Promise<DriveMediaFil
 
 const isVideo = (f: DriveMediaFile) => (f.mimeType ?? '').startsWith('video/') || /\.(mov|mp4|m4v|hevc)$/i.test(f.name)
 const num = (v: unknown) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v))
+
+/** Moves a file or folder from one parent to another (nothing is deleted). */
+async function moveTo(token: string, id: string, from: string, to: string): Promise<void> {
+  await g(token, `${API}/files/${encodeURIComponent(id)}?addParents=${encodeURIComponent(to)}&removeParents=${encodeURIComponent(from)}&supportsAllDrives=true&fields=id`, { method: 'PATCH' })
+}
+
+const AIA_LIFE = 'AiA Life'
+type Moved = { id: string; name: string; from: string; to: string }
+
+/**
+ * Not a product review: hide the product and (optionally) move its folders from Content Library/Products
+ * into the existing sibling Content Library/AiA Life. AiA Life is never created; when it isn't there the
+ * product is still hidden and the footage stays where it is.
+ */
+async function archive(db: SupabaseClient, productId: string, reason: string, move: boolean) {
+  const { data: p, error } = await db.from('products').select('id,name,drive_folder_id,drive_folder_name,extra_drive_folders,archived_at').eq('id', productId).maybeSingle()
+  if (error) throw new HttpError(500, /archived_at/.test(error.message) ? 'Hiding needs the database update (migration 0008).' : error.message)
+  if (!p) throw new HttpError(404, 'That product was not found.')
+  const moved: Moved[] = []
+  const notes: string[] = []
+  const folders = [
+    ...(p.drive_folder_id ? [{ id: p.drive_folder_id as string, name: (p.drive_folder_name as string | null) ?? p.name }] : []),
+    ...((p.extra_drive_folders ?? []) as { id: string | null; name: string | null }[]).filter((f) => f.id).map((f) => ({ id: f.id!, name: f.name ?? 'Second folder' })),
+  ]
+  if (move && !folders.length) notes.push('It has no Drive folder, so nothing was moved.')
+  if (move && folders.length) {
+    const row = await loadRow(db)
+    const token = await accessToken(row.refresh_token)
+    const products = await productsFolder(db, token, row)
+    // AiA Life is a sibling of the Products folder: look in the Products folder's own parent
+    const library = (await getFile(token, products)).parents?.[0] ?? row.content_library_id ?? null
+    const aia = library ? await findFolder(token, AIA_LIFE, library) : null
+    if (!aia) notes.push(`No “${AIA_LIFE}” folder next to Products in the Content Library, so the footage stayed where it is.`)
+    else {
+      for (const f of folders) {
+        try {
+          const file = await getFile(token, f.id)
+          if (file.trashed) { notes.push(`${f.name} is in the Drive trash; left there.`); continue }
+          if (!(file.parents ?? []).includes(products)) { notes.push(`${file.name} is not in the Products folder; left where it is.`); continue }
+          await moveTo(token, f.id, products, aia)
+          moved.push({ id: f.id, name: file.name, from: products, to: aia })
+        } catch (e) {
+          notes.push(`${f.name}: ${(e as Error).message}`)
+        }
+      }
+    }
+  }
+  const note = notes.join(' ') || null
+  const { error: ue } = await db.from('products').update({
+    archived_at: new Date().toISOString(), archived_reason: reason || 'not_a_product',
+    archived_move: { moved, note, at: new Date().toISOString() },
+  }).eq('id', productId)
+  if (ue) throw new HttpError(500, ue.message)
+  return { moved: moved.length, folders: folders.length, note }
+}
+
+/** Restore: shown again; folders Hide moved go back to where they came from (only if still in AiA Life). */
+async function restore(db: SupabaseClient, productId: string) {
+  const { data: p, error } = await db.from('products').select('id,archived_move').eq('id', productId).maybeSingle()
+  if (error) throw new HttpError(500, error.message)
+  if (!p) throw new HttpError(404, 'That product was not found.')
+  const moved = ((p.archived_move as { moved?: Moved[] } | null)?.moved ?? [])
+  const notes: string[] = []
+  let back = 0
+  if (moved.length) {
+    const row = await loadRow(db)
+    const token = await accessToken(row.refresh_token)
+    for (const m of moved) {
+      try {
+        const file = await getFile(token, m.id)
+        if (!(file.parents ?? []).includes(m.to)) { notes.push(`${file.name} was moved out of ${AIA_LIFE} by hand; left where it is.`); continue }
+        await moveTo(token, m.id, m.to, m.from)
+        back++
+      } catch (e) {
+        notes.push(`${m.name}: ${(e as Error).message}`)
+      }
+    }
+  }
+  const { error: ue } = await db.from('products').update({ archived_at: null, archived_reason: null, archived_move: null }).eq('id', productId)
+  if (ue) throw new HttpError(500, ue.message)
+  return { moved_back: back, note: notes.join(' ') || null }
+}
 
 const folderName = (name: string) => name.replace(/[/\\]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 120)
 
@@ -407,6 +491,12 @@ serve(async (body, { user, db }) => {
       await db.from('google_drive').update({ products_folder_id: f.id, content_library_id: f.parents?.[0] ?? null, updated_at: new Date().toISOString() }).eq('id', true)
       return { products_folder_id: f.id, name: f.name }
     }
+
+    case 'archive':
+      return await archive(db, String(body.product_id ?? ''), String(body.reason ?? 'not_a_product'), body.move !== false)
+
+    case 'restore':
+      return await restore(db, String(body.product_id ?? ''))
 
     default:
       throw new HttpError(400, 'Unknown action.')

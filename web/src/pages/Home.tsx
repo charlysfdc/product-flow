@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useSnapshot } from '../lib/data'
 import { supabase } from '../lib/supabase'
 import type { Deal, Job, Listing, Platform, Post, Product, ProductStatus, ViralVueReminder } from '../lib/types'
@@ -70,12 +70,15 @@ export function Home() {
   const { data, error, reload } = useSnapshot()
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
+  const [showHidden, setShowHidden] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const location = useLocation()
+  const [notice, setNotice] = useState<string | null>(() => (location.state as { notice?: string } | null)?.notice ?? null)
 
   const view = useMemo((): View | null => {
     if (!data) return null
-    const { products, listings, posts, jobs, deals, waiting, quiet, reminders } = data
+    const { products, hidden, listings, posts, jobs, deals, waiting, quiet, reminders } = data
     const byId = new Map(products.map((p) => [p.id, p]))
 
     const q = query.trim().toLowerCase()
@@ -83,7 +86,7 @@ export function Home() {
       const asinHits = new Set(
         listings.filter((l) => l.external_id && l.external_id.toLowerCase().includes(q)).map((l) => l.product_id),
       )
-      const results = products
+      const results = (showHidden ? [...products, ...hidden] : products)
         .filter((p) => p.name.toLowerCase().includes(q) || (p.brand ?? '').toLowerCase().includes(q) || asinHits.has(p.id) || (p.upc ?? '').includes(q))
         .sort((a, b) => a.name.localeCompare(b.name))
       return { kind: 'search', search: results }
@@ -137,7 +140,7 @@ export function Home() {
       quiet,
       counts: { total: products.length, done: products.filter((p) => p.status === 'done').length },
     }
-  }, [data, query])
+  }, [data, query, showHidden])
 
   const advance = async (p: Product) => {
     const next = STEP[p.status].next
@@ -190,10 +193,14 @@ export function Home() {
 
       {error && <p className="error">Could not load: {error}</p>}
       {actionError && <p className="error">{actionError}</p>}
+      {notice && <div className="notice"><span>{notice}</span><button onClick={() => setNotice(null)}>OK</button></div>}
 
       {view && view.kind === 'search' && (
         <section>
           <h2>{view.search.length} result{view.search.length === 1 ? '' : 's'}</h2>
+          {(data?.hidden.length ?? 0) > 0 && (
+            <label className="toggle"><input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} /> Show hidden ({data!.hidden.length})</label>
+          )}
           <ul className="list">
             {view.search.map((p) => <ProductRow key={p.id} product={p} showStatus />)}
           </ul>

@@ -4,7 +4,9 @@ import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import { importDeals, type ImportSummary } from '../lib/deals'
 import { detectExport, importViews, type ViewsSummary } from '../lib/views'
-import { driveStatus, listFolders, setProductsFolder, type DriveStatus, type FolderListing } from '../lib/functions'
+import { driveStatus, listFolders, restoreProduct, setProductsFolder, type DriveStatus, type FolderListing } from '../lib/functions'
+import { ARCHIVE_REASON_LABEL, type Product } from '../lib/types'
+import { Thumb } from '../components/ProductRow'
 import { Sheet } from '../components/Sheet'
 import { PhoneSheet } from '../components/Clips'
 import { phoneName, setPhoneName } from '../lib/upload'
@@ -150,6 +152,8 @@ export function Settings() {
         </div>
       </section>
 
+      <HiddenProducts />
+
       <section>
         <h2>About</h2>
         <p className="muted small">Product Flow · data in Supabase, footage in Google Drive.</p>
@@ -210,5 +214,57 @@ function FolderPicker({ onClose, onPicked }: { onClose: () => void; onPicked: ()
         </button>
       </div>
     </Sheet>
+  )
+}
+
+/** Settings > Hidden: products taken out of the flow (Not a product review), with Restore. */
+function HiddenProducts() {
+  const [items, setItems] = useState<Product[] | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+  const load = () => {
+    supabase.from('products').select('*').not('archived_at', 'is', null).order('archived_at', { ascending: false })
+      .then(({ data, error }) => setItems(error ? [] : (data ?? []) as Product[]))
+  }
+  useEffect(load, [])
+  const restore = async (p: Product) => {
+    setBusy(p.id)
+    setNote(null)
+    try {
+      const r = await restoreProduct(p.id)
+      setNote(`${p.name} is back in the flow.${r.moved_back ? ' Its footage is back in Products.' : ''}${r.note ? ` ${r.note}` : ''}`)
+      load()
+    } catch (e) {
+      setNote(`Restore failed: ${(e as Error).message}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+  return (
+    <section>
+      <h2>Hidden <span className="count">{items?.length ?? '…'}</span></h2>
+      {note && <p className="muted small" style={{ margin: '0 4px 8px' }}>{note}</p>}
+      {items && items.length === 0 ? (
+        <p className="empty">Nothing hidden. On a Product screen, Housekeeping → Not a product review takes random footage out of the flow.</p>
+      ) : (
+        <ul className="list">
+          {(items ?? []).map((p) => (
+            <li key={p.id}>
+              <div className="row">
+                <Thumb src={p.product_image_url} name={p.name} />
+                <Link to={`/product/${p.id}`} className="row-main" style={{ color: 'inherit' }}>
+                  <span className="row-title">{p.name}</span>
+                  <span className="row-sub">
+                    <span>{ARCHIVE_REASON_LABEL[p.archived_reason ?? ''] ?? 'Hidden'}</span>
+                    {p.archived_move?.moved?.length ? <span>footage in AiA Life</span> : null}
+                  </span>
+                </Link>
+                <button className="secondary" disabled={busy === p.id} onClick={() => restore(p)}>{busy === p.id ? 'Restoring…' : 'Restore'}</button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }

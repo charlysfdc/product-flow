@@ -21,6 +21,7 @@ const products = [
   P('p8', 'Castor Oil', { brand: 'Sky Organics', status: 'editing', drive_folder_id: 'x8', deadline: inDays(1) }),
   P('p9', 'Flashforge AD5X', { brand: 'Flashforge', status: 'ready' }),
   P('p10', 'Eufy Robot Vacuum', { brand: 'Eufy', status: 'done' }),
+  P('p13', 'IMG_2231 kitchen', { status: 'ready', source: 'unknown', drive_folder_id: 'x13' }),
   P('p12', 'Blood Pressure Monitor', { brand: 'Omron', status: 'ready', drive_folder_id: 'x12', received_at: '2026-10-02' }),
 ]
 const listings = [
@@ -167,6 +168,7 @@ function applyFilters(rows: Record<string, unknown>[], params: URLSearchParams) 
     if (op === 'eq') out = out.filter((r) => String(r[k]) === val)
     else if (op === 'neq') out = out.filter((r) => String(r[k]) !== val)
     else if (op === 'is' && val === 'null') out = out.filter((r) => r[k] == null)
+    else if (op === 'not' && val === 'is.null') out = out.filter((r) => r[k] != null)
     else if (op === 'in') { const set = val.replace(/^\(|\)$/g, '').split(','); out = out.filter((r) => set.includes(String(r[k]))) }
     else if (op === 'ilike') { const re = new RegExp('^' + val.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/[%*]/g, '.*') + '$', 'i'); out = out.filter((r) => re.test(String(r[k] ?? ''))) }
   }
@@ -187,6 +189,14 @@ export const demoFetch: typeof fetch = async (input, init) => {
     if (url.pathname.endsWith('/edit')) return demoEdit(body)
     if (url.pathname.endsWith('/publish')) return demoPublish(body)
     if (body.action === 'status') return json({ connected: false, email: null, products_folder_id: null })
+    if (body.action === 'archive' || body.action === 'restore') {
+      const p = products.find((x) => x.id === body.product_id) as Record<string, unknown> | undefined
+      const moved = body.action === 'archive' && body.move && p?.drive_folder_id ? [{ id: String(p.drive_folder_id), name: String(p.name), from: 'products', to: 'aia' }] : []
+      if (p) Object.assign(p, body.action === 'archive'
+        ? { archived_at: new Date().toISOString(), archived_reason: body.reason, archived_move: { moved, note: null } }
+        : { archived_at: null, archived_reason: null, archived_move: null })
+      return json(body.action === 'archive' ? { moved: moved.length, folders: moved.length, note: null } : { moved_back: 1, note: null })
+    }
     if (body.action?.endsWith('upload') || body.action === 'upload_status' || body.action === 'sync') return demoDrive(body)
     return json({ folder_id: 'demo', folder_name: 'demo', created: true, media_id: 'm', drive_file_id: 'f' })
   }

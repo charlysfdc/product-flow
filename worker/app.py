@@ -1,6 +1,7 @@
 """Product Flow edit worker on Modal.
 
   POST https://<workspace>--product-flow-edit.modal.run  {"job_id": "..."}   (Authorization: Bearer <WORKER_SECRET>)
+  GET  https://<workspace>--product-flow-media.modal.run?f=&e=&m=&s=      (a link signed by Supabase; see pf/media.py)
 
 The endpoint answers at once and starts `edit_job` in the background. The job asks the Supabase `worker`
 function for everything it needs (product, raw clips, a Drive token, the finished folder, the Claude key),
@@ -249,3 +250,22 @@ def start(body: dict, request: "fastapi.Request"):  # noqa: F821
         raise HTTPException(status_code=400, detail="job_id is missing.")
     call = edit_job.spawn(job_id)
     return {"ok": True, "call_id": call.object_id}
+
+
+# ---------------------------------------------------------------- playing finished files on the phone
+
+# A small image of its own so a cold start takes a second or two, not the edit image's ffmpeg and OpenCV.
+media_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .uv_pip_install("fastapi[standard]==0.146.0", "httpx==0.28.1")
+    .add_local_python_source("pf")
+)
+
+
+@app.function(image=media_image, secrets=[secret], timeout=900, scaledown_window=300)
+@modal.concurrent(max_inputs=50)
+@modal.asgi_app(label="product-flow-media")
+def media():
+    """Streams finished videos and thumbnails from Drive for links signed by Supabase (see pf/media.py)."""
+    from pf.media import make_app, worker_token_source
+    return make_app(os.environ["WORKER_SECRET"], worker_token_source(SUPABASE_URL))

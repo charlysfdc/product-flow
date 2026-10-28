@@ -1,5 +1,5 @@
 // The shared secret between the Supabase functions and the Modal worker (WORKER_SECRET), and the
-// short-lived signed links the review screen plays finished videos from.
+// short-lived signed links the review screen plays finished videos from (served by Modal, see worker/pf/media.py).
 
 export function workerSecret(): string {
   const s = Deno.env.get('WORKER_SECRET')
@@ -24,12 +24,16 @@ async function hmac(text: string): Promise<string> {
   return b64url(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(text)))
 }
 
-/** A link to /functions/v1/media that plays one Drive file for `hours`, without the phone holding any token. */
+/**
+ * A link that plays one Drive file for `hours`, without the phone holding any token. Served by the Modal
+ * `media` endpoint (MODAL_MEDIA_URL, set by deploy-worker.yml) so video bytes don't count against Supabase's
+ * egress quota; /functions/v1/media checks the same signature and is the fallback when that isn't set.
+ */
 export async function signedMediaUrl(fileId: string, mime: string, hours = 6): Promise<string> {
   const e = Math.floor(Date.now() / 1000) + hours * 3600
   const s = await hmac(`${fileId}.${e}.${mime}`)
-  const base = Deno.env.get('SUPABASE_URL')!
-  return `${base}/functions/v1/media?f=${encodeURIComponent(fileId)}&e=${e}&m=${encodeURIComponent(mime)}&s=${s}`
+  const base = Deno.env.get('MODAL_MEDIA_URL')?.replace(/\/+$/, '') || `${Deno.env.get('SUPABASE_URL')}/functions/v1/media`
+  return `${base}?f=${encodeURIComponent(fileId)}&e=${e}&m=${encodeURIComponent(mime)}&s=${s}`
 }
 
 export async function checkSignature(fileId: string, e: string, mime: string, s: string): Promise<boolean> {

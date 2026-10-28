@@ -26,6 +26,9 @@ scales to zero between edits, and never needs the Mac.
    Progress goes to `jobs.output.progress` on the way, which the phone sees live (realtime on `jobs`).
 6. Review screen: **Approve** sets the product to Ready ("Edited, not posted"). **Redo** moves this cut to
    `finished/Earlier drafts`, and a new job gets the note plus the previous plan so Claude adjusts it.
+   The review screen and Save video play the finished files from the Modal `media` endpoint (`pf/media.py`,
+   a small CPU container), with links signed by Supabase; video bytes no longer pass through Supabase, whose
+   Free plan allows only 5 GB of egress a month (Modal's Starter plan includes 1 TiB).
 
 ## Voice-over (footage without talking)
 
@@ -60,13 +63,13 @@ setting a new value in GitHub and re-running both deploy workflows.
 |---|---|
 | GitHub repository | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` (Charly), `WORKER_SECRET` (generated), `SUPABASE_ACCESS_TOKEN` (Phase 1) |
 | Modal secret `product-flow-worker` | `WORKER_SECRET` (set by `deploy-worker.yml`) |
-| Supabase function secrets | `WORKER_SECRET`, `MODAL_EDIT_URL` (set by the workflows), plus the existing `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
+| Supabase function secrets | `WORKER_SECRET`, `MODAL_EDIT_URL`, `MODAL_MEDIA_URL` (set by the workflows), plus the existing `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
 
 ## Deploy
 
 `.github/workflows/deploy-worker.yml` runs on every push to `main` that touches `worker/`: it stores
-`WORKER_SECRET` in Modal, runs `modal deploy app.py`, reads the endpoint URL and saves it in Supabase as
-`MODAL_EDIT_URL`. The Supabase functions (`edit`, `worker`, `media`) deploy with the others from
+`WORKER_SECRET` in Modal, runs `modal deploy app.py`, reads the endpoint URLs and saves them in Supabase as
+`MODAL_EDIT_URL` and `MODAL_MEDIA_URL`. The Supabase functions (`edit`, `worker`, `media`) deploy with the others from
 `deploy-functions.yml`.
 
 ## Cost per edit

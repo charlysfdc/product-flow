@@ -40,12 +40,15 @@ jobs:
       - run: modal secret create product-flow-worker WORKER_SECRET="$WORKER_SECRET" --force > /dev/null
       - run: modal deploy app.py
         working-directory: worker
-      - name: Find the endpoint URL
+      - name: Find the endpoint URLs
         id: url
-        run: echo "url=$(python -c "import modal; print(modal.Function.from_name('product-flow', 'start').get_web_url())")" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "url=$(python -c "import modal; print(modal.Function.from_name('product-flow', 'start').get_web_url())")" >> "$GITHUB_OUTPUT"
+          echo "media=$(python -c "import modal; print(modal.Function.from_name('product-flow', 'media').get_web_url())")" >> "$GITHUB_OUTPUT"
       - uses: supabase/setup-cli@v1
         with:
           version: latest
       # The edit function calls the worker at MODAL_EDIT_URL with WORKER_SECRET; the worker calls back with it.
-      - run: supabase secrets set --project-ref "$PROJECT_REF" MODAL_EDIT_URL="${{ steps.url.outputs.url }}" WORKER_SECRET="$WORKER_SECRET" > /dev/null
-      - run: echo "Worker live at ${{ steps.url.outputs.url }}"
+      # MODAL_MEDIA_URL: signed links for the review screen and Save video play from Modal, not Supabase (egress).
+      - run: supabase secrets set --project-ref "$PROJECT_REF" MODAL_EDIT_URL="${{ steps.url.outputs.url }}" MODAL_MEDIA_URL="${{ steps.url.outputs.media }}" WORKER_SECRET="$WORKER_SECRET" > /dev/null
+      - run: echo "Worker live at ${{ steps.url.outputs.url }}, media at ${{ steps.url.outputs.media }}"
